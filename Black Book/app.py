@@ -282,7 +282,7 @@ def inject_css() -> None:
 
 def get_connection():  # returns sqlite3.Connection or psycopg2 connection
     if IS_POSTGRES:
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor, sslmode="require")
         conn.autocommit = False
         return conn
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -1885,4 +1885,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    
