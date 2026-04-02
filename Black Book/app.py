@@ -1,23 +1,5 @@
 """
-Budget Black Book
-Run locally:
-    1. pip install -r requirements.txt
-    2. streamlit run app.py
-
-Migration:
-    - On first launch, the app looks for `Budget Black Book copy.xlsx` or
-      `Budget Black Book.xlsx` in the app folder and your Downloads folder.
-    - If a workbook is found, the app imports:
-        * Spending Log -> transactions
-        * Investments -> holdings
-        * Home settings/balances -> accounts + settings
-    - Migration runs once and sets a completion flag in the database.
-
-Storage:
-    - By default the app uses a local SQLite database named
-      `budget_black_book.db`.
-    - Set `BUDGET_BLACK_BOOK_DB_PATH` to change the file location.
-    - For hosted deployment, point that env var to persistent storage.
+Budget Black Book — Cloud Edition
 """
 
 from __future__ import annotations
@@ -50,7 +32,6 @@ except ImportError:
 APP_TITLE = "Budget Black Book"
 DB_PATH = Path(os.getenv("BUDGET_BLACK_BOOK_DB_PATH", "budget_black_book.db"))
 
-# Load DATABASE_URL from Streamlit secrets if not already in environment.
 if "DATABASE_URL" not in os.environ:
     try:
         _url = st.secrets.get("DATABASE_URL", "")
@@ -62,74 +43,48 @@ if "DATABASE_URL" not in os.environ:
 DATABASE_URL: str = os.environ.get("DATABASE_URL", "")
 IS_POSTGRES: bool = bool(DATABASE_URL) and _PSYCOPG2_AVAILABLE
 DATE_FMT = "%Y-%m-%d"
+
 DEFAULT_SETTINGS = {
-    "daily_food_budget": "30",
-    "pay_period_days": "14",
-    "statement_day": "2",
-    "due_day": "27",
-    "savings_pct": "0.30",
-    "spending_pct": "0.40",
-    "crypto_pct": "0.10",
-    "taxable_investing_pct": "0.10",
-    "roth_ira_pct": "0.10",
-    "debt_allocation_mode": "proportional",
-    "migration_completed": "0",
-    "last_price_refresh_at": "",
+    "daily_food_budget": "30", "pay_period_days": "14", "statement_day": "2",
+    "due_day": "27", "savings_pct": "0.30", "spending_pct": "0.40",
+    "crypto_pct": "0.10", "taxable_investing_pct": "0.10", "roth_ira_pct": "0.10",
+    "debt_allocation_mode": "proportional", "migration_completed": "0", "last_price_refresh_at": "",
 }
 DEFAULT_ACCOUNTS = [
-    {"name": "Checking", "account_type": "cash", "is_debt": 0, "include_in_runway": 1, "sort_order": 1},
-    {"name": "Savings", "account_type": "savings", "is_debt": 0, "include_in_runway": 1, "sort_order": 2},
-    {"name": "Savor", "account_type": "credit", "is_debt": 1, "include_in_runway": 0, "sort_order": 3},
-    {"name": "Venture", "account_type": "credit", "is_debt": 1, "include_in_runway": 0, "sort_order": 4},
-    {"name": "Coinbase", "account_type": "investment", "is_debt": 0, "include_in_runway": 0, "sort_order": 5},
-    {"name": "Roth IRA", "account_type": "investment", "is_debt": 0, "include_in_runway": 0, "sort_order": 6},
+    {"name": "Checking",    "account_type": "cash",       "is_debt": 0, "include_in_runway": 1, "sort_order": 1},
+    {"name": "Savings",     "account_type": "savings",    "is_debt": 0, "include_in_runway": 1, "sort_order": 2},
+    {"name": "Savor",       "account_type": "credit",     "is_debt": 1, "include_in_runway": 0, "sort_order": 3},
+    {"name": "Venture",     "account_type": "credit",     "is_debt": 1, "include_in_runway": 0, "sort_order": 4},
+    {"name": "Coinbase",    "account_type": "investment", "is_debt": 0, "include_in_runway": 0, "sort_order": 5},
+    {"name": "Roth IRA",    "account_type": "investment", "is_debt": 0, "include_in_runway": 0, "sort_order": 6},
     {"name": "Investments", "account_type": "investment", "is_debt": 0, "include_in_runway": 0, "sort_order": 7},
 ]
 COMMON_CATEGORIES = [
-    "Food",
-    "Bills",
-    "Subscriptions",
-    "Income",
-    "Debt Payment",
-    "Gas",
-    "Health",
-    "Shopping",
-    "Entertainment",
-    "Savings",
-    "Transfer",
-    "Investing",
-    "Other",
+    "Food", "Bills", "Subscriptions", "Income", "Debt Payment",
+    "Gas", "Health", "Shopping", "Entertainment", "Savings",
+    "Transfer", "Investing", "Other",
 ]
 CRYPTO_NAME_TO_ID = {
-    "XRP": "ripple",
-    "Bitcoin (BTC)": "bitcoin",
-    "Bittensor (TAO)": "bittensor",
-    "Worldcoin (WLD)": "worldcoin-wld",
-    "Sui (SUI)": "sui",
-    "Solana (SOL)": "solana",
-    "Cash (USD)": "",
+    "XRP": "ripple", "Bitcoin (BTC)": "bitcoin", "Bittensor (TAO)": "bittensor",
+    "Worldcoin (WLD)": "worldcoin-wld", "Sui (SUI)": "sui",
+    "Solana (SOL)": "solana", "Cash (USD)": "",
 }
 STOCK_NAME_TO_TICKER = {
-    "NVIDIA (NVDA)": "NVDA",
-    "Palantir (PLTR)": "PLTR",
-    "Tesla (TSLA)": "TSLA",
-    "Invesco QQQ (QQQ)": "QQQ",
-    "SPDR S&P 500 (SPY)": "SPY",
-}
-ASSET_EMOJI = {
-    "cash": "💵",
-    "savings": "🏦",
-    "credit": "💳",
-    "investment": "📈",
+    "NVIDIA (NVDA)": "NVDA", "Palantir (PLTR)": "PLTR", "Tesla (TSLA)": "TSLA",
+    "Invesco QQQ (QQQ)": "QQQ", "SPDR S&P 500 (SPY)": "SPY",
 }
 
+# Colour palette
+C_GREEN  = "#00c896"
+C_GOLD   = "#f0a500"
+C_RED    = "#ff4d4d"
+C_BLUE   = "#4da6ff"
+C_PURPLE = "#a78bfa"
+C_PINK   = "#f472b6"
+C_DIM    = "#6b7280"
+CHART_PALETTE = [C_GREEN, C_BLUE, C_GOLD, C_PURPLE, C_PINK, C_RED, "#34d399"]
 
-st.set_page_config(
-    page_title=APP_TITLE,
-    page_icon="📖",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+st.set_page_config(page_title=APP_TITLE, page_icon="📖", layout="wide", initial_sidebar_state="expanded")
 
 
 @dataclass
@@ -139,342 +94,212 @@ class Signal:
     body: str
 
 
+# ── CSS ───────────────────────────────────────────────────────────────────────
+
 def inject_css() -> None:
-    st.markdown(
-        """
-        <style>
-        /* ── Layout ───────────────────────────────── */
-        .main > div { padding-top: 1rem; }
-        section[data-testid="stSidebar"] {
-            background: #080b10;
-            border-right: 1px solid rgba(255,255,255,0.05);
-        }
+    st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=JetBrains+Mono:wght@400;600&display=swap');
 
-        /* ── Typography ───────────────────────────── */
-        h1 { font-size: 1.1rem !important; font-weight: 700 !important;
-             letter-spacing: 0.12em !important; text-transform: uppercase;
-             color: #e2e2e2 !important; margin-bottom: 0.25rem !important; }
-        h2, h3 { font-size: 0.75rem !important; font-weight: 600 !important;
-                 letter-spacing: 0.1em !important; text-transform: uppercase;
-                 color: #6b7280 !important; margin-top: 1.25rem !important; }
+    .main > div { padding-top: 0.5rem; }
 
-        /* ── Metrics ──────────────────────────────── */
-        [data-testid="stMetric"] {
-            background: rgba(255,255,255,0.02);
-            border: 1px solid rgba(255,255,255,0.06);
-            border-radius: 3px;
-            padding: 0.75rem 1rem 0.55rem 1rem;
-        }
-        [data-testid="stMetricLabel"] p {
-            font-size: 0.65rem !important;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            color: #6b7280 !important;
-        }
-        [data-testid="stMetricValue"] {
-            font-family: 'SF Mono', 'Consolas', 'Courier New', monospace !important;
-            font-size: 1.15rem !important;
-            color: #f0f0f0 !important;
-        }
-        [data-testid="stMetricDelta"] {
-            font-family: 'SF Mono', 'Consolas', 'Courier New', monospace !important;
-            font-size: 0.75rem !important;
-        }
+    section[data-testid="stSidebar"] {
+        background: #060810;
+        border-right: 1px solid rgba(255,255,255,0.04);
+    }
 
-        /* ── Signal banner ────────────────────────── */
-        .term-signal {
-            display: flex;
-            align-items: baseline;
-            gap: 0.8rem;
-            padding: 0.6rem 1rem;
-            border-left: 3px solid;
-            background: rgba(255,255,255,0.02);
-            margin-bottom: 1rem;
-        }
-        .term-signal-danger  { border-color: #ff4d4d; }
-        .term-signal-warning { border-color: #f0a500; }
-        .term-signal-success { border-color: #00c896; }
-        .term-signal-title {
-            font-size: 0.72rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.09em;
-            white-space: nowrap;
-        }
-        .term-signal-danger  .term-signal-title { color: #ff4d4d; }
-        .term-signal-warning .term-signal-title { color: #f0a500; }
-        .term-signal-success .term-signal-title { color: #00c896; }
-        .term-signal-body {
-            font-size: 0.78rem;
-            color: #9ca3af;
-            line-height: 1.4;
-        }
+    /* Title */
+    .bb-title {
+        font-family: 'Playfair Display', serif;
+        font-size: 2.4rem;
+        font-weight: 900;
+        letter-spacing: 0.05em;
+        color: #f0f0f0;
+        line-height: 1;
+        margin-bottom: 0;
+    }
+    .bb-subtitle {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.62rem;
+        letter-spacing: 0.25em;
+        color: #374151;
+        text-transform: uppercase;
+        margin-bottom: 1.2rem;
+        border-bottom: 1px solid rgba(255,255,255,0.04);
+        padding-bottom: 0.8rem;
+    }
 
-        /* ── Account rows ─────────────────────────── */
-        .term-accounts { width: 100%; }
-        .term-acct-header {
-            display: grid;
-            grid-template-columns: 1fr 120px 70px;
-            padding: 0 0 0.35rem 0;
-            border-bottom: 1px solid rgba(255,255,255,0.08);
-            margin-bottom: 0.1rem;
-        }
-        .term-acct-header span {
-            font-size: 0.6rem;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            color: #4b5563;
-        }
-        .term-acct-header span:not(:first-child) { text-align: right; }
-        .term-acct-row {
-            display: grid;
-            grid-template-columns: 1fr 120px 70px;
-            padding: 0.45rem 0;
-            border-bottom: 1px solid rgba(255,255,255,0.03);
-        }
-        .term-acct-row:hover { background: rgba(255,255,255,0.02); }
-        .term-acct-name {
-            font-size: 0.78rem;
-            letter-spacing: 0.04em;
-            color: #c9d1d9;
-        }
-        .term-acct-bal {
-            font-family: 'SF Mono', 'Consolas', 'Courier New', monospace;
-            font-size: 0.82rem;
-            font-weight: 600;
-            text-align: right;
-            color: #f0f0f0;
-        }
-        .term-acct-bal.neg { color: #ff4d4d; }
-        .term-acct-type {
-            font-size: 0.62rem;
-            text-transform: uppercase;
-            letter-spacing: 0.07em;
-            color: #4b5563;
-            text-align: right;
-        }
-        .term-acct-debt .term-acct-bal { color: #ff4d4d; }
-        .term-acct-debt .term-acct-name { color: #9ca3af; }
+    /* Section headers */
+    h2, h3 {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.65rem !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.18em !important;
+        text-transform: uppercase !important;
+        color: #374151 !important;
+        margin-top: 1.5rem !important;
+        margin-bottom: 0.5rem !important;
+    }
 
-        /* ── Dataframes ───────────────────────────── */
-        [data-testid="stDataFrame"] {
-            border: 1px solid rgba(255,255,255,0.06) !important;
-            border-radius: 3px !important;
-        }
+    /* Metrics */
+    [data-testid="stMetric"] {
+        background: #0d1117;
+        border: 1px solid rgba(255,255,255,0.05);
+        border-radius: 2px;
+        padding: 0.9rem 1rem 0.7rem 1rem;
+        position: relative;
+    }
+    [data-testid="stMetric"]::before {
+        content: '';
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(0,200,150,0.3), transparent);
+    }
+    [data-testid="stMetricLabel"] p {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.6rem !important;
+        text-transform: uppercase;
+        letter-spacing: 0.15em;
+        color: #374151 !important;
+    }
+    [data-testid="stMetricValue"] {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 1.2rem !important;
+        color: #e2e8f0 !important;
+    }
+    [data-testid="stMetricDelta"] {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.72rem !important;
+    }
 
-        /* ── Buttons ──────────────────────────────── */
-        [data-testid="baseButton-primary"] {
-            border-radius: 3px !important;
-            letter-spacing: 0.06em;
-            font-size: 0.78rem !important;
-        }
+    /* Dataframes */
+    [data-testid="stDataFrame"] {
+        border: 1px solid rgba(255,255,255,0.05) !important;
+        border-radius: 2px !important;
+    }
 
-        /* ── Sidebar nav ──────────────────────────── */
-        [data-testid="stRadio"] label {
-            font-size: 0.78rem !important;
-            letter-spacing: 0.06em;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    /* Buttons */
+    [data-testid="baseButton-primary"] {
+        border-radius: 2px !important;
+        letter-spacing: 0.1em;
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.72rem !important;
+        text-transform: uppercase;
+    }
 
+    /* Sidebar */
+    [data-testid="stRadio"] label {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.72rem !important;
+        letter-spacing: 0.08em;
+    }
+
+    /* Sidebar caption */
+    .bb-sidebar-brand {
+        font-family: 'Playfair Display', serif;
+        font-size: 1rem;
+        font-weight: 700;
+        color: #374151;
+        letter-spacing: 0.05em;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+# ── DB core ───────────────────────────────────────────────────────────────────
 
 def get_connection():
     url = st.secrets.get("DATABASE_URL") or os.environ.get("DATABASE_URL")
     if not url:
         st.error("DATABASE_URL is not configured.")
         st.stop()
-    # Embed sslmode in the URL to avoid kwarg conflict with psycopg2
     if "sslmode" not in url:
         url += "?sslmode=require"
-    conn = psycopg2.connect(url, cursor_factory=psycopg2.extras.RealDictCursor)
-    return conn
+    return psycopg2.connect(url, cursor_factory=psycopg2.extras.RealDictCursor)
 
 
 def db_execute(conn, sql: str, params: tuple = ()) -> Any:
-    """Execute a single parameterized statement on either SQLite or PostgreSQL.
-
-    Uses %s placeholders in SQL (PostgreSQL style). Converts to ? for SQLite.
-    Returns the cursor so callers can use .fetchone(), .fetchall(), .lastrowid, etc.
-    """
     if IS_POSTGRES:
         cur = conn.cursor()
         cur.execute(sql, params)
         return cur
-    # SQLite expects ? placeholders.
-    sqlite_sql = re.sub(r"%s", "?", sql)
-    return conn.execute(sqlite_sql, params)
+    return conn.execute(re.sub(r"%s", "?", sql), params)
 
 
 def _to_float_series(s: pd.Series) -> pd.Series:
-    """Safely coerce any pandas Series to float, handling Arrow-backed types from Postgres."""
     return pd.to_numeric(s, errors="coerce").fillna(0.0).astype(float)
 
 
+def _cursor_to_df(cur) -> pd.DataFrame:
+    """
+    THE definitive fix for RealDictCursor + pandas.
+
+    pd.read_sql_query with psycopg2 RealDictCursor iterates over dict KEYS
+    instead of values, producing DataFrames where every cell contains the
+    column name as a string. We bypass this by fetching rows ourselves and
+    converting each RealDictRow to a plain Python dict before building the DF.
+    """
+    rows = cur.fetchall()
+    if not rows:
+        cols = [desc[0] for desc in cur.description] if cur.description else []
+        return pd.DataFrame(columns=cols)
+    return pd.DataFrame([dict(row) for row in rows])
+
+
+# ── Schema ────────────────────────────────────────────────────────────────────
+
 def init_db() -> None:
     serial = "SERIAL" if IS_POSTGRES else "INTEGER"
-    autoincrement = "" if IS_POSTGRES else "AUTOINCREMENT"
-    ddl_statements = [
-        f"""
-        CREATE TABLE IF NOT EXISTS accounts (
-            id {serial} PRIMARY KEY {autoincrement},
-            name TEXT NOT NULL UNIQUE,
-            account_type TEXT NOT NULL,
-            is_debt INTEGER NOT NULL DEFAULT 0,
-            include_in_runway INTEGER NOT NULL DEFAULT 1,
-            starting_balance REAL NOT NULL DEFAULT 0,
-            sort_order INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        )
-        """,
-        f"""
-        CREATE TABLE IF NOT EXISTS transactions (
-            id {serial} PRIMARY KEY {autoincrement},
-            date TEXT NOT NULL,
-            description TEXT NOT NULL,
-            category TEXT NOT NULL,
-            amount REAL NOT NULL,
-            account_id INTEGER NOT NULL,
-            type TEXT NOT NULL,
-            to_account_id INTEGER,
-            notes TEXT,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(account_id) REFERENCES accounts(id),
-            FOREIGN KEY(to_account_id) REFERENCES accounts(id)
-        )
-        """,
-        f"""
-        CREATE TABLE IF NOT EXISTS holdings (
-            id {serial} PRIMARY KEY {autoincrement},
-            symbol TEXT NOT NULL,
-            display_name TEXT NOT NULL,
-            asset_type TEXT NOT NULL,
-            account_id INTEGER NOT NULL,
-            amount_invested REAL NOT NULL DEFAULT 0,
-            quantity REAL NOT NULL DEFAULT 0,
-            avg_price REAL NOT NULL DEFAULT 0,
-            coingecko_id TEXT,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(account_id) REFERENCES accounts(id)
-        )
-        """,
-        f"""
-        CREATE TABLE IF NOT EXISTS allocation_snapshots (
-            id {serial} PRIMARY KEY {autoincrement},
-            paycheck_amount REAL NOT NULL,
-            run_date TEXT NOT NULL,
-            debt_total REAL NOT NULL,
-            food_reserved REAL NOT NULL,
-            debt_reserved REAL NOT NULL,
-            savings_reserved REAL NOT NULL,
-            spending_reserved REAL NOT NULL,
-            crypto_reserved REAL NOT NULL,
-            taxable_reserved REAL NOT NULL,
-            roth_reserved REAL NOT NULL,
-            debt_breakdown_json TEXT NOT NULL,
-            meta_json TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS price_cache (
-            symbol TEXT NOT NULL,
-            asset_type TEXT NOT NULL,
-            price REAL NOT NULL,
-            previous_close REAL,
-            currency TEXT NOT NULL DEFAULT 'USD',
-            source TEXT NOT NULL,
-            as_of_date TEXT NOT NULL,
-            fetched_at TEXT NOT NULL,
-            PRIMARY KEY(symbol, asset_type)
-        )
-        """,
-        f"""
-        CREATE TABLE IF NOT EXISTS price_history (
-            id {serial} PRIMARY KEY {autoincrement},
-            symbol TEXT NOT NULL,
-            asset_type TEXT NOT NULL,
-            price REAL NOT NULL,
-            previous_close REAL,
-            as_of_date TEXT NOT NULL,
-            source TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
+    ai = "" if IS_POSTGRES else "AUTOINCREMENT"
+    ddl = [
+        f"CREATE TABLE IF NOT EXISTS accounts (id {serial} PRIMARY KEY {ai}, name TEXT NOT NULL UNIQUE, account_type TEXT NOT NULL, is_debt INTEGER NOT NULL DEFAULT 0, include_in_runway INTEGER NOT NULL DEFAULT 1, starting_balance REAL NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        f"CREATE TABLE IF NOT EXISTS transactions (id {serial} PRIMARY KEY {ai}, date TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, amount REAL NOT NULL, account_id INTEGER NOT NULL, type TEXT NOT NULL, to_account_id INTEGER, notes TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(account_id) REFERENCES accounts(id), FOREIGN KEY(to_account_id) REFERENCES accounts(id))",
+        f"CREATE TABLE IF NOT EXISTS holdings (id {serial} PRIMARY KEY {ai}, symbol TEXT NOT NULL, display_name TEXT NOT NULL, asset_type TEXT NOT NULL, account_id INTEGER NOT NULL, amount_invested REAL NOT NULL DEFAULT 0, quantity REAL NOT NULL DEFAULT 0, avg_price REAL NOT NULL DEFAULT 0, coingecko_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(account_id) REFERENCES accounts(id))",
+        f"CREATE TABLE IF NOT EXISTS allocation_snapshots (id {serial} PRIMARY KEY {ai}, paycheck_amount REAL NOT NULL, run_date TEXT NOT NULL, debt_total REAL NOT NULL, food_reserved REAL NOT NULL, debt_reserved REAL NOT NULL, savings_reserved REAL NOT NULL, spending_reserved REAL NOT NULL, crypto_reserved REAL NOT NULL, taxable_reserved REAL NOT NULL, roth_reserved REAL NOT NULL, debt_breakdown_json TEXT NOT NULL, meta_json TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE IF NOT EXISTS price_cache (symbol TEXT NOT NULL, asset_type TEXT NOT NULL, price REAL NOT NULL, previous_close REAL, currency TEXT NOT NULL DEFAULT 'USD', source TEXT NOT NULL, as_of_date TEXT NOT NULL, fetched_at TEXT NOT NULL, PRIMARY KEY(symbol, asset_type))",
+        f"CREATE TABLE IF NOT EXISTS price_history (id {serial} PRIMARY KEY {ai}, symbol TEXT NOT NULL, asset_type TEXT NOT NULL, price REAL NOT NULL, previous_close REAL, as_of_date TEXT NOT NULL, source TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     ]
     conn = get_connection()
     try:
-        for stmt in ddl_statements:
+        for stmt in ddl:
             db_execute(conn, stmt)
-        for key, value in DEFAULT_SETTINGS.items():
-            db_execute(
-                conn,
-                "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT(key) DO NOTHING",
-                (key, value),
-            )
-        for account in DEFAULT_ACCOUNTS:
-            db_execute(
-                conn,
-                """
-                INSERT INTO accounts
-                (name, account_type, is_debt, include_in_runway, starting_balance, sort_order)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT(name) DO NOTHING
-                """,
-                (
-                    account["name"],
-                    account["account_type"],
-                    account["is_debt"],
-                    account["include_in_runway"],
-                    0.0,
-                    account["sort_order"],
-                ),
-            )
+        for k, v in DEFAULT_SETTINGS.items():
+            db_execute(conn, "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT(key) DO NOTHING", (k, v))
+        for a in DEFAULT_ACCOUNTS:
+            db_execute(conn, "INSERT INTO accounts (name, account_type, is_debt, include_in_runway, starting_balance, sort_order) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT(name) DO NOTHING",
+                       (a["name"], a["account_type"], a["is_debt"], a["include_in_runway"], 0.0, a["sort_order"]))
         conn.commit()
     finally:
         conn.close()
 
 
+# ── Data access (all use _cursor_to_df — no pd.read_sql_query) ───────────────
+
 def table_exists_with_rows(table_name: str) -> bool:
     conn = get_connection()
     try:
-        cur = db_execute(conn, f"SELECT COUNT(*) AS count FROM {table_name}")
-        row = cur.fetchone()
+        row = db_execute(conn, f"SELECT COUNT(*) AS count FROM {table_name}").fetchone()
     finally:
         conn.close()
-    return bool(row["count"])
+    return bool(int(row["count"]))
 
 
 def get_settings() -> dict[str, str]:
     conn = get_connection()
     try:
-        cur = db_execute(conn, "SELECT key, value FROM settings")
-        rows = cur.fetchall()
+        rows = db_execute(conn, "SELECT key, value FROM settings").fetchall()
     finally:
         conn.close()
-    return {row["key"]: row["value"] for row in rows}
+    return {str(r["key"]): str(r["value"]) for r in rows}
 
 
 def set_settings(settings: dict[str, Any]) -> None:
     conn = get_connection()
     try:
-        for key, value in settings.items():
-            db_execute(
-                conn,
-                """
-                INSERT INTO settings (key, value) VALUES (%s, %s)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """,
-                (key, str(value)),
-            )
+        for k, v in settings.items():
+            db_execute(conn, "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (k, str(v)))
         conn.commit()
     finally:
         conn.close()
@@ -483,53 +308,39 @@ def set_settings(settings: dict[str, Any]) -> None:
 def load_accounts() -> pd.DataFrame:
     conn = get_connection()
     try:
-        df = pd.read_sql_query(
-            """
-            SELECT id, name, account_type, is_debt, include_in_runway, starting_balance, sort_order
-            FROM accounts
-            ORDER BY sort_order, name
-            """,
-            conn,
-        )
+        cur = db_execute(conn, "SELECT id, name, account_type, is_debt, include_in_runway, starting_balance, sort_order FROM accounts ORDER BY sort_order, name")
+        df = _cursor_to_df(cur)
     finally:
         conn.close()
+    if df.empty:
+        return df
     for col in ("id", "is_debt", "include_in_runway", "sort_order"):
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
     df["starting_balance"] = _to_float_series(df["starting_balance"])
-    df = pd.DataFrame(df.to_dict("records"))  # ← only new line
+    df["name"] = df["name"].astype(str)
+    df["account_type"] = df["account_type"].astype(str)
     return df
 
 
-def add_transaction(
-    tx_date: date,
-    description: str,
-    category: str,
-    amount: float,
-    account_id: int,
-    tx_type: str,
-    to_account_id: int | None,
-    notes: str,
-) -> None:
+def add_account(name: str, account_type: str, is_debt: int, include_in_runway: int) -> None:
     conn = get_connection()
     try:
-        db_execute(
-            conn,
-            """
-            INSERT INTO transactions
-            (date, description, category, amount, account_id, type, to_account_id, notes)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                tx_date.strftime(DATE_FMT),
-                description.strip(),
-                category,
-                float(amount),
-                int(account_id),
-                tx_type,
-                int(to_account_id) if to_account_id else None,
-                notes.strip() or None,
-            ),
-        )
+        row = db_execute(conn, "SELECT COUNT(*) AS count FROM accounts").fetchone()
+        sort_order = int(row["count"]) + 1
+        db_execute(conn, "INSERT INTO accounts (name, account_type, is_debt, include_in_runway, starting_balance, sort_order) VALUES (%s, %s, %s, %s, 0.0, %s) ON CONFLICT(name) DO NOTHING",
+                   (name, account_type, is_debt, include_in_runway, sort_order))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def add_transaction(tx_date: date, description: str, category: str, amount: float,
+                    account_id: int, tx_type: str, to_account_id: int | None, notes: str) -> None:
+    conn = get_connection()
+    try:
+        db_execute(conn, "INSERT INTO transactions (date, description, category, amount, account_id, type, to_account_id, notes) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                   (tx_date.strftime(DATE_FMT), description.strip(), category, float(amount), int(account_id), tx_type,
+                    int(to_account_id) if to_account_id else None, notes.strip() or None))
         conn.commit()
     finally:
         conn.close()
@@ -538,27 +349,15 @@ def add_transaction(
 def load_transactions() -> pd.DataFrame:
     conn = get_connection()
     try:
-        df = pd.read_sql_query(
-            """
-            SELECT
-                t.id,
-                t.date,
-                t.description,
-                t.category,
-                t.amount,
-                t.type,
-                t.notes,
-                a.name AS account,
-                a.id AS account_id,
-                ta.name AS to_account,
-                ta.id AS to_account_id
+        cur = db_execute(conn, """
+            SELECT t.id, t.date, t.description, t.category, t.amount, t.type, t.notes,
+                   a.name AS account, a.id AS account_id,
+                   ta.name AS to_account, ta.id AS to_account_id
             FROM transactions t
             JOIN accounts a ON a.id = t.account_id
             LEFT JOIN accounts ta ON ta.id = t.to_account_id
-            ORDER BY t.date DESC, t.id DESC
-            """,
-            conn,
-        )
+            ORDER BY t.date DESC, t.id DESC""")
+        df = _cursor_to_df(cur)
     finally:
         conn.close()
     if df.empty:
@@ -566,32 +365,22 @@ def load_transactions() -> pd.DataFrame:
     df["date"] = pd.to_datetime(df["date"]).dt.date
     df["amount"] = _to_float_series(df["amount"])
     df["account_id"] = pd.to_numeric(df["account_id"], errors="coerce").fillna(0).astype(int)
-    df["to_account_id"] = pd.to_numeric(df["to_account_id"], errors="coerce")  # keep NaN for nulls
+    df["to_account_id"] = pd.to_numeric(df["to_account_id"], errors="coerce")
+    for col in ("description", "category", "type", "account"):
+        df[col] = df[col].astype(str)
     return df
 
 
 def load_holdings() -> pd.DataFrame:
     conn = get_connection()
     try:
-        df = pd.read_sql_query(
-            """
-            SELECT
-                h.id,
-                h.symbol,
-                h.display_name,
-                h.asset_type,
-                h.amount_invested,
-                h.quantity,
-                h.avg_price,
-                h.coingecko_id,
-                a.name AS account,
-                a.id AS account_id
-            FROM holdings h
-            JOIN accounts a ON a.id = h.account_id
-            ORDER BY a.sort_order, h.display_name
-            """,
-            conn,
-        )
+        cur = db_execute(conn, """
+            SELECT h.id, h.symbol, h.display_name, h.asset_type,
+                   h.amount_invested, h.quantity, h.avg_price, h.coingecko_id,
+                   a.name AS account, a.id AS account_id
+            FROM holdings h JOIN accounts a ON a.id = h.account_id
+            ORDER BY a.sort_order, h.display_name""")
+        df = _cursor_to_df(cur)
     finally:
         conn.close()
     if df.empty:
@@ -599,36 +388,23 @@ def load_holdings() -> pd.DataFrame:
     for col in ("amount_invested", "quantity", "avg_price"):
         df[col] = _to_float_series(df[col])
     df["account_id"] = pd.to_numeric(df["account_id"], errors="coerce").fillna(0).astype(int)
+    for col in ("symbol", "display_name", "asset_type", "account"):
+        df[col] = df[col].astype(str)
     return df
 
 
 def save_allocation_snapshot(payload: dict[str, Any]) -> None:
     conn = get_connection()
     try:
-        db_execute(
-            conn,
-            """
-            INSERT INTO allocation_snapshots (
-                paycheck_amount, run_date, debt_total, food_reserved, debt_reserved,
-                savings_reserved, spending_reserved, crypto_reserved, taxable_reserved,
-                roth_reserved, debt_breakdown_json, meta_json
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                payload["paycheck_amount"],
-                payload["run_date"],
-                payload["debt_total"],
-                payload["food_reserved"],
-                payload["debt_reserved"],
-                payload["savings_reserved"],
-                payload["spending_reserved"],
-                payload["crypto_reserved"],
-                payload["taxable_reserved"],
-                payload["roth_reserved"],
-                json.dumps(payload["debt_breakdown"]),
-                json.dumps(payload["meta"]),
-            ),
-        )
+        db_execute(conn, """INSERT INTO allocation_snapshots
+            (paycheck_amount, run_date, debt_total, food_reserved, debt_reserved,
+             savings_reserved, spending_reserved, crypto_reserved, taxable_reserved,
+             roth_reserved, debt_breakdown_json, meta_json)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                   (payload["paycheck_amount"], payload["run_date"], payload["debt_total"],
+                    payload["food_reserved"], payload["debt_reserved"], payload["savings_reserved"],
+                    payload["spending_reserved"], payload["crypto_reserved"], payload["taxable_reserved"],
+                    payload["roth_reserved"], json.dumps(payload["debt_breakdown"]), json.dumps(payload["meta"])))
         conn.commit()
     finally:
         conn.close()
@@ -637,28 +413,16 @@ def save_allocation_snapshot(payload: dict[str, Any]) -> None:
 def load_allocation_snapshots(limit: int = 10) -> pd.DataFrame:
     conn = get_connection()
     try:
-        df = pd.read_sql_query(
-            """
-            SELECT *
-            FROM allocation_snapshots
-            ORDER BY run_date DESC, id DESC
-            LIMIT %s
-            """ if IS_POSTGRES else """
-            SELECT *
-            FROM allocation_snapshots
-            ORDER BY date(run_date) DESC, id DESC
-            LIMIT ?
-            """,
-            conn,
-            params=(limit,),
-        )
+        sql = "SELECT * FROM allocation_snapshots ORDER BY run_date DESC, id DESC LIMIT %s" if IS_POSTGRES \
+              else "SELECT * FROM allocation_snapshots ORDER BY date(run_date) DESC, id DESC LIMIT ?"
+        cur = db_execute(conn, sql, (limit,))
+        df = _cursor_to_df(cur)
     finally:
         conn.close()
     if df.empty:
         return df
     for col in ("paycheck_amount", "debt_total", "food_reserved", "debt_reserved",
-                "savings_reserved", "spending_reserved", "crypto_reserved",
-                "taxable_reserved", "roth_reserved"):
+                "savings_reserved", "spending_reserved", "crypto_reserved", "taxable_reserved", "roth_reserved"):
         if col in df.columns:
             df[col] = _to_float_series(df[col])
     return df
@@ -668,32 +432,16 @@ def upsert_price(symbol: str, asset_type: str, price: float, previous_close: flo
     fetched_at = datetime.now().isoformat(timespec="seconds")
     conn = get_connection()
     try:
-        db_execute(
-            conn,
-            """
-            INSERT INTO price_cache (symbol, asset_type, price, previous_close, currency, source, as_of_date, fetched_at)
-            VALUES (%s, %s, %s, %s, 'USD', %s, %s, %s)
-            ON CONFLICT(symbol, asset_type) DO UPDATE SET
-                price = excluded.price,
-                previous_close = excluded.previous_close,
-                source = excluded.source,
-                as_of_date = excluded.as_of_date,
-                fetched_at = excluded.fetched_at
-            """,
-            (symbol, asset_type, price, previous_close, source, as_of_date, fetched_at),
-        )
-        db_execute(
-            conn,
-            """
-            INSERT INTO price_history (symbol, asset_type, price, previous_close, as_of_date, source)
-            SELECT %s, %s, %s, %s, %s, %s
-            WHERE NOT EXISTS (
-                SELECT 1 FROM price_history
-                WHERE symbol = %s AND asset_type = %s AND as_of_date = %s
-            )
-            """,
-            (symbol, asset_type, price, previous_close, as_of_date, source, symbol, asset_type, as_of_date),
-        )
+        db_execute(conn, """INSERT INTO price_cache (symbol, asset_type, price, previous_close, currency, source, as_of_date, fetched_at)
+            VALUES (%s,%s,%s,%s,'USD',%s,%s,%s)
+            ON CONFLICT(symbol, asset_type) DO UPDATE SET price=excluded.price,
+            previous_close=excluded.previous_close, source=excluded.source,
+            as_of_date=excluded.as_of_date, fetched_at=excluded.fetched_at""",
+                   (symbol, asset_type, price, previous_close, source, as_of_date, fetched_at))
+        db_execute(conn, """INSERT INTO price_history (symbol, asset_type, price, previous_close, as_of_date, source)
+            SELECT %s,%s,%s,%s,%s,%s WHERE NOT EXISTS
+            (SELECT 1 FROM price_history WHERE symbol=%s AND asset_type=%s AND as_of_date=%s)""",
+                   (symbol, asset_type, price, previous_close, as_of_date, source, symbol, asset_type, as_of_date))
         conn.commit()
     finally:
         conn.close()
@@ -702,7 +450,7 @@ def upsert_price(symbol: str, asset_type: str, price: float, previous_close: flo
 def load_price_cache() -> pd.DataFrame:
     conn = get_connection()
     try:
-        df = pd.read_sql_query("SELECT * FROM price_cache", conn)
+        df = _cursor_to_df(db_execute(conn, "SELECT * FROM price_cache"))
     finally:
         conn.close()
     if df.empty:
@@ -715,10 +463,7 @@ def load_price_cache() -> pd.DataFrame:
 def load_price_history() -> pd.DataFrame:
     conn = get_connection()
     try:
-        df = pd.read_sql_query(
-            "SELECT symbol, asset_type, price, previous_close, as_of_date FROM price_history ORDER BY as_of_date",
-            conn,
-        )
+        df = _cursor_to_df(db_execute(conn, "SELECT symbol, asset_type, price, previous_close, as_of_date FROM price_history ORDER BY as_of_date"))
     finally:
         conn.close()
     if df.empty:
@@ -728,222 +473,113 @@ def load_price_history() -> pd.DataFrame:
     return df
 
 
+# ── Excel migration ───────────────────────────────────────────────────────────
+
 def excel_serial_to_date(value: Any) -> date | None:
-    if pd.isna(value) or value in ("", None):
-        return None
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    if isinstance(value, (int, float)):
-        origin = datetime(1899, 12, 30)
-        return (origin + timedelta(days=float(value))).date()
-    try:
-        return pd.to_datetime(value).date()
-    except Exception:
-        return None
+    if pd.isna(value) or value in ("", None): return None
+    if isinstance(value, datetime): return value.date()
+    if isinstance(value, date): return value
+    if isinstance(value, (int, float)): return (datetime(1899, 12, 30) + timedelta(days=float(value))).date()
+    try: return pd.to_datetime(value).date()
+    except Exception: return None
 
 
 def detect_workbook() -> Path | None:
-    candidates = [
-        Path.cwd() / "Budget Black Book copy.xlsx",
-        Path.cwd() / "Budget Black Book.xlsx",
-        Path.home() / "Downloads" / "Budget Black Book copy.xlsx",
-        Path.home() / "Downloads" / "Budget Black Book.xlsx",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
+    for c in [Path.cwd() / "Budget Black Book copy.xlsx", Path.cwd() / "Budget Black Book.xlsx",
+               Path.home() / "Downloads" / "Budget Black Book copy.xlsx", Path.home() / "Downloads" / "Budget Black Book.xlsx"]:
+        if c.exists(): return c
     return None
 
 
 def normalize_account_name(name: Any) -> str:
     value = str(name or "").strip()
-    mapping = {
-        "Savor (CC)": "Savor",
-        "Venture (CC)": "Venture",
-        "Roth IRA (Fidelity)": "Roth IRA",
-        "Investments (Fidelity)": "Investments",
-    }
-    return mapping.get(value, value)
+    return {"Savor (CC)": "Savor", "Venture (CC)": "Venture", "Roth IRA (Fidelity)": "Roth IRA", "Investments (Fidelity)": "Investments"}.get(value, value)
 
 
 def parse_home_settings(home_df: pd.DataFrame) -> tuple[dict[str, float], dict[str, str]]:
-    settings_updates: dict[str, str] = {}
-    account_balances: dict[str, float] = {}
-    lookup_rows = {
-        "Daily Budget": ("daily_food_budget", "numeric"),
-        "Checking — Starting Balance": ("Checking", "account"),
-        "Savings — Starting Balance": ("Savings", "account"),
-        "Savor (CC) — Starting Balance": ("Savor", "account"),
-        "Venture (CC) — Starting Balance": ("Venture", "account"),
-        "Coinbase — Starting Balance": ("Coinbase", "account"),
-        "Roth IRA (Fidelity) — Starting Balance": ("Roth IRA", "account"),
-        "Investments (Fidelity) — Starting Balance": ("Investments", "account"),
-    }
-
+    su: dict[str, str] = {}; ab: dict[str, float] = {}
+    lu = {"Daily Budget": ("daily_food_budget", "numeric"), "Checking — Starting Balance": ("Checking", "account"),
+          "Savings — Starting Balance": ("Savings", "account"), "Savor (CC) — Starting Balance": ("Savor", "account"),
+          "Venture (CC) — Starting Balance": ("Venture", "account"), "Coinbase — Starting Balance": ("Coinbase", "account"),
+          "Roth IRA (Fidelity) — Starting Balance": ("Roth IRA", "account"), "Investments (Fidelity) — Starting Balance": ("Investments", "account")}
     for _, row in home_df.iterrows():
         label = str(row.iloc[2]).strip() if len(row) > 2 and pd.notna(row.iloc[2]) else ""
         value = row.iloc[4] if len(row) > 4 else None
-        if label in lookup_rows and pd.notna(value):
-            target, kind = lookup_rows[label]
-            if kind == "numeric":
-                settings_updates[target] = str(float(value))
-            else:
-                account_balances[target] = float(value)
-
-    return account_balances, settings_updates
+        if label in lu and pd.notna(value):
+            target, kind = lu[label]
+            if kind == "numeric": su[target] = str(float(value))
+            else: ab[target] = float(value)
+    return ab, su
 
 
 def ensure_account(conn, name: str) -> int:
-    cur = db_execute(conn, "SELECT id FROM accounts WHERE name = %s", (name,))
-    existing = cur.fetchone()
-    if existing:
-        return int(existing["id"])
-    fallback = next((a for a in DEFAULT_ACCOUNTS if a["name"] == name), None)
-    account_type = fallback["account_type"] if fallback else "cash"
-    is_debt = fallback["is_debt"] if fallback else 0
-    include_in_runway = fallback["include_in_runway"] if fallback else 1
-    sort_order = fallback["sort_order"] if fallback else 99
+    existing = db_execute(conn, "SELECT id FROM accounts WHERE name = %s", (name,)).fetchone()
+    if existing: return int(existing["id"])
+    fb = next((a for a in DEFAULT_ACCOUNTS if a["name"] == name), None)
+    at = fb["account_type"] if fb else "cash"; isd = fb["is_debt"] if fb else 0
+    inc = fb["include_in_runway"] if fb else 1; so = fb["sort_order"] if fb else 99
     if IS_POSTGRES:
-        cur = db_execute(
-            conn,
-            """
-            INSERT INTO accounts (name, account_type, is_debt, include_in_runway, starting_balance, sort_order)
-            VALUES (%s, %s, %s, %s, 0, %s)
-            RETURNING id
-            """,
-            (name, account_type, is_debt, include_in_runway, sort_order),
-        )
-        return int(cur.fetchone()["id"])
-    cur = db_execute(
-        conn,
-        """
-        INSERT INTO accounts (name, account_type, is_debt, include_in_runway, starting_balance, sort_order)
-        VALUES (%s, %s, %s, %s, 0, %s)
-        """,
-        (name, account_type, is_debt, include_in_runway, sort_order),
-    )
-    return int(cur.lastrowid)
+        return int(db_execute(conn, "INSERT INTO accounts (name, account_type, is_debt, include_in_runway, starting_balance, sort_order) VALUES (%s,%s,%s,%s,0,%s) RETURNING id",
+                              (name, at, isd, inc, so)).fetchone()["id"])
+    return int(db_execute(conn, "INSERT INTO accounts (name, account_type, is_debt, include_in_runway, starting_balance, sort_order) VALUES (%s,%s,%s,%s,0,%s)",
+                          (name, at, isd, inc, so)).lastrowid)
 
 
 def migrate_from_excel_if_needed() -> str | None:
-    settings = get_settings()
-    if settings.get("migration_completed") == "1":
-        return None
-
-    workbook_path = detect_workbook()
-    if not workbook_path:
-        return None
-
+    if get_settings().get("migration_completed") == "1": return None
+    wp = detect_workbook()
+    if not wp: return None
     try:
-        home_df = pd.read_excel(workbook_path, sheet_name="Home", header=None, engine="openpyxl")
-        spending_df = pd.read_excel(workbook_path, sheet_name="Spending Log", header=4, engine="openpyxl")
-        investments_df = pd.read_excel(workbook_path, sheet_name="Investments", header=12, engine="openpyxl")
+        home_df = pd.read_excel(wp, sheet_name="Home", header=None, engine="openpyxl")
+        spending_df = pd.read_excel(wp, sheet_name="Spending Log", header=4, engine="openpyxl")
+        investments_df = pd.read_excel(wp, sheet_name="Investments", header=12, engine="openpyxl")
     except Exception as exc:
-        return f"Workbook found at `{workbook_path}`, but import failed: {exc}"
-
+        return f"Import failed: {exc}"
     conn = get_connection()
     try:
-        account_balances, settings_updates = parse_home_settings(home_df)
-        for name, balance in account_balances.items():
-            account_id = ensure_account(conn, name)
-            db_execute(conn, "UPDATE accounts SET starting_balance = %s WHERE id = %s", (float(balance), account_id))
-        for key, value in settings_updates.items():
-            db_execute(
-                conn,
-                """
-                INSERT INTO settings (key, value) VALUES (%s, %s)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """,
-                (key, value),
-            )
-
+        ab, su = parse_home_settings(home_df)
+        for name, balance in ab.items():
+            db_execute(conn, "UPDATE accounts SET starting_balance = %s WHERE id = %s", (float(balance), ensure_account(conn, name)))
+        for k, v in su.items():
+            db_execute(conn, "INSERT INTO settings (key, value) VALUES (%s,%s) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, v))
         if not table_exists_with_rows("transactions"):
-            spending_df.columns = [str(col).strip() for col in spending_df.columns]
+            spending_df.columns = [str(c).strip() for c in spending_df.columns]
             spending_df = spending_df.dropna(how="all")
             for _, row in spending_df.iterrows():
-                tx_date = excel_serial_to_date(row.get("Date"))
-                description = str(row.get("Description") or "").strip()
-                category = str(row.get("Category") or "Other").strip()
-                amount = row.get("Amount")
-                account = normalize_account_name(row.get("Account"))
-                tx_type = str(row.get("Type") or "Expense").strip()
-                to_account = normalize_account_name(row.get("To Account"))
-                if not tx_date or not description or pd.isna(amount) or not account:
-                    continue
-                account_id = ensure_account(conn, account)
-                to_account_id = ensure_account(conn, to_account) if to_account else None
-                db_execute(
-                    conn,
-                    """
-                    INSERT INTO transactions
-                    (date, description, category, amount, account_id, type, to_account_id, notes)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, NULL)
-                    """,
-                    (tx_date.strftime(DATE_FMT), description, category, float(amount), account_id, tx_type, to_account_id),
-                )
-
+                tx_date = excel_serial_to_date(row.get("Date")); desc = str(row.get("Description") or "").strip()
+                cat = str(row.get("Category") or "Other").strip(); amount = row.get("Amount")
+                acct = normalize_account_name(row.get("Account")); ttype = str(row.get("Type") or "Expense").strip()
+                to_acct = normalize_account_name(row.get("To Account"))
+                if not tx_date or not desc or pd.isna(amount) or not acct: continue
+                aid = ensure_account(conn, acct); taid = ensure_account(conn, to_acct) if to_acct else None
+                db_execute(conn, "INSERT INTO transactions (date, description, category, amount, account_id, type, to_account_id, notes) VALUES (%s,%s,%s,%s,%s,%s,%s,NULL)",
+                           (tx_date.strftime(DATE_FMT), desc, cat, float(amount), aid, ttype, taid))
         if not table_exists_with_rows("holdings"):
-            investments_df.columns = [str(col).strip() for col in investments_df.columns]
-            investments_df = investments_df.dropna(how="all")
-            rename_map = {
-                "TICKER / NAME": "Ticker / Name",
-                "ACCOUNT": "Account",
-                "AMOUNT ($)": "Amount ($)",
-                "HOLDING AMT": "Holding Amt",
-                "AVG PRICE": "Avg Price",
-            }
-            investments_df = investments_df.rename(columns=rename_map)
-            required_cols = {"Ticker / Name", "Account", "Amount ($)", "Holding Amt", "Avg Price"}
-            if required_cols.issubset(set(investments_df.columns)):
+            investments_df.columns = [str(c).strip() for c in investments_df.columns]
+            investments_df = investments_df.dropna(how="all").rename(columns={"TICKER / NAME":"Ticker / Name","ACCOUNT":"Account","AMOUNT ($)":"Amount ($)","HOLDING AMT":"Holding Amt","AVG PRICE":"Avg Price"})
+            if {"Ticker / Name","Account","Amount ($)","Holding Amt","Avg Price"}.issubset(set(investments_df.columns)):
                 for _, row in investments_df.iterrows():
-                    name = str(row.get("Ticker / Name") or "").strip()
-                    account_name = normalize_account_name(row.get("Account"))
-                    if not name or not account_name:
-                        continue
-                    amount_invested = coerce_float(row.get("Amount ($)"), 0.0)
-                    quantity = coerce_float(row.get("Holding Amt"), 0.0)
-                    avg_price = coerce_float(row.get("Avg Price"), 0.0)
-                    account_id = ensure_account(conn, account_name)
-
-                    if account_name == "Coinbase":
-                        asset_type = "crypto" if "Cash" not in name else "cash"
-                        symbol = name
-                        coingecko_id = CRYPTO_NAME_TO_ID.get(name, "")
-                    else:
-                        asset_type = "etf" if any(tag in name for tag in ("QQQ", "SPY")) else "stock"
-                        symbol = STOCK_NAME_TO_TICKER.get(name, name)
-                        coingecko_id = None
-
-                    db_execute(
-                        conn,
-                        """
-                        INSERT INTO holdings
-                        (symbol, display_name, asset_type, account_id, amount_invested, quantity, avg_price, coingecko_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                        """,
-                        (symbol, name, asset_type, account_id, amount_invested, quantity, avg_price, coingecko_id),
-                    )
-
-        db_execute(
-            conn,
-            """
-            INSERT INTO settings (key, value) VALUES ('migration_completed', '1')
-            ON CONFLICT(key) DO UPDATE SET value = '1'
-            """,
-        )
+                    name = str(row.get("Ticker / Name") or "").strip(); an = normalize_account_name(row.get("Account"))
+                    if not name or not an: continue
+                    ai_val = coerce_float(row.get("Amount ($)")); qty = coerce_float(row.get("Holding Amt")); ap = coerce_float(row.get("Avg Price"))
+                    aid = ensure_account(conn, an)
+                    if an == "Coinbase": at = "crypto" if "Cash" not in name else "cash"; sym = name; cg = CRYPTO_NAME_TO_ID.get(name, "")
+                    else: at = "etf" if any(t in name for t in ("QQQ","SPY")) else "stock"; sym = STOCK_NAME_TO_TICKER.get(name, name); cg = None
+                    db_execute(conn, "INSERT INTO holdings (symbol, display_name, asset_type, account_id, amount_invested, quantity, avg_price, coingecko_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                               (sym, name, at, aid, ai_val, qty, ap, cg))
+        db_execute(conn, "INSERT INTO settings (key, value) VALUES ('migration_completed','1') ON CONFLICT(key) DO UPDATE SET value='1'")
         conn.commit()
     finally:
         conn.close()
+    return f"Imported workbook from `{wp}`."
 
-    return f"Imported workbook data from `{workbook_path}`."
 
+# ── Utility ───────────────────────────────────────────────────────────────────
 
 def coerce_float(value: Any, fallback: float = 0.0) -> float:
     try:
-        result = float(value)
-        return fallback if math.isnan(result) else result
+        r = float(value)
+        return fallback if math.isnan(r) else r
     except Exception:
         return fallback
 
@@ -961,430 +597,288 @@ def safe_div(num: float, denom: float) -> float:
     return num / denom if denom else 0.0
 
 
-def _chart_theme(fig) -> object:
-    """Apply consistent terminal-style theme to a plotly figure."""
-    fig.update_layout(
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#6b7280", size=10, family="SF Mono, Consolas, Courier New, monospace"),
-        title_font=dict(color="#9ca3af", size=11),
-        legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor="rgba(255,255,255,0.06)", font=dict(size=10)),
-        margin=dict(l=0, r=0, t=36, b=0),
-    )
-    fig.update_xaxes(gridcolor="rgba(255,255,255,0.04)", zerolinecolor="rgba(255,255,255,0.06)", tickfont=dict(size=9))
-    fig.update_yaxes(gridcolor="rgba(255,255,255,0.04)", zerolinecolor="rgba(255,255,255,0.06)", tickfont=dict(size=9))
-    return fig
-
-
 def get_setting_float(settings: dict[str, str], key: str) -> float:
     return coerce_float(settings.get(key), 0.0)
 
 
-def build_enriched_holdings(holdings_df: pd.DataFrame, price_cache_df: pd.DataFrame) -> pd.DataFrame:
-    if holdings_df.empty:
-        return holdings_df
+def _chart_theme(fig, title: str = "") -> object:
+    """Apply Black Book dark chart theme."""
+    fig.update_layout(
+        title=dict(text=title, font=dict(family="JetBrains Mono, monospace", size=10, color="#374151"),
+                   x=0, xanchor="left", pad=dict(l=0, b=8)) if title else dict(text=""),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#6b7280", size=10, family="JetBrains Mono, monospace"),
+        legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor="rgba(255,255,255,0.04)",
+                    borderwidth=1, font=dict(size=9, family="JetBrains Mono, monospace")),
+        margin=dict(l=0, r=0, t=28 if title else 4, b=0),
+        hoverlabel=dict(bgcolor="#0d1117", bordercolor="rgba(255,255,255,0.1)",
+                        font=dict(family="JetBrains Mono, monospace", size=10)),
+    )
+    fig.update_xaxes(
+        gridcolor="rgba(255,255,255,0.03)", zerolinecolor="rgba(255,255,255,0.05)",
+        tickfont=dict(size=9, family="JetBrains Mono, monospace"), showline=False,
+    )
+    fig.update_yaxes(
+        gridcolor="rgba(255,255,255,0.03)", zerolinecolor="rgba(255,255,255,0.05)",
+        tickfont=dict(size=9, family="JetBrains Mono, monospace"), showline=False,
+    )
+    return fig
 
+
+def _pie_chart(labels, values, title="") -> go.Figure:
+    fig = go.Figure(go.Pie(
+        labels=labels, values=values,
+        hole=0.6,
+        marker=dict(colors=CHART_PALETTE, line=dict(color="#060810", width=2)),
+        textfont=dict(family="JetBrains Mono, monospace", size=9),
+        textposition="outside",
+        hovertemplate="<b>%{label}</b><br>%{value:,.2f}<br>%{percent}<extra></extra>",
+    ))
+    _chart_theme(fig, title)
+    fig.update_layout(showlegend=True, legend=dict(orientation="v", x=1.02, y=0.5))
+    return fig
+
+
+def _bar_chart(x, y, color=C_GREEN, title="", hline=None) -> go.Figure:
+    fig = go.Figure(go.Bar(
+        x=x, y=y,
+        marker=dict(
+            color=color,
+            opacity=0.85,
+            line=dict(width=0),
+        ),
+        hovertemplate="%{x}<br><b>$%{y:,.2f}</b><extra></extra>",
+    ))
+    if hline is not None:
+        fig.add_hline(y=hline, line_dash="dot", line_color=C_GOLD, line_width=1,
+                      annotation_text="cap", annotation_font=dict(color=C_GOLD, size=8, family="JetBrains Mono, monospace"),
+                      annotation_position="top right")
+    _chart_theme(fig, title)
+    return fig
+
+
+def _line_chart(x, y, color=C_GREEN, title="") -> go.Figure:
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=x, y=y, mode="lines",
+        line=dict(color=color, width=2),
+        fill="tozeroy",
+        fillcolor=color.replace(")", ", 0.08)").replace("rgb(", "rgba(") if "rgb" in color else f"rgba(0,200,150,0.06)",
+        hovertemplate="<b>$%{y:,.2f}</b><extra></extra>",
+    ))
+    _chart_theme(fig, title)
+    return fig
+
+
+# ── Business logic ────────────────────────────────────────────────────────────
+
+def build_enriched_holdings(holdings_df: pd.DataFrame, price_cache_df: pd.DataFrame) -> pd.DataFrame:
+    if holdings_df.empty: return holdings_df
     enriched = holdings_df.copy()
-    # Ensure numeric types are clean before any arithmetic
     for col in ("amount_invested", "quantity", "avg_price"):
         enriched[col] = _to_float_series(enriched[col])
-
-    price_map = {}
-    if not price_cache_df.empty:
-        price_map = {
-            (row["symbol"], row["asset_type"]): row for _, row in price_cache_df.iterrows()
-        }
-
-    latest_price = []
-    previous_close = []
-    price_source = []
-    fetched_at = []
+    price_map = {} if price_cache_df.empty else {(r["symbol"], r["asset_type"]): r for _, r in price_cache_df.iterrows()}
+    lp, pc, ps, fa = [], [], [], []
     for _, row in enriched.iterrows():
-        cache_row = price_map.get((row["symbol"], row["asset_type"]))
-        if cache_row is not None:
-            latest_price.append(float(cache_row["price"]))
-            previous_close.append(coerce_float(cache_row["previous_close"], float(cache_row["price"])))
-            price_source.append(cache_row["source"])
-            fetched_at.append(cache_row["fetched_at"])
+        cr = price_map.get((row["symbol"], row["asset_type"]))
+        if cr is not None:
+            lp.append(float(cr["price"])); pc.append(coerce_float(cr["previous_close"], float(cr["price"])))
+            ps.append(cr["source"]); fa.append(cr["fetched_at"])
         else:
-            fallback = 1.0 if row["asset_type"] == "cash" and row["display_name"] == "Cash (USD)" else float(row["avg_price"] or 0)
-            latest_price.append(fallback)
-            previous_close.append(fallback)
-            price_source.append("fallback")
-            fetched_at.append("")
-
-    enriched["latest_price"] = latest_price
-    enriched["previous_close"] = previous_close
-    enriched["price_source"] = price_source
-    enriched["fetched_at"] = fetched_at
+            fb = 1.0 if row["asset_type"] == "cash" and row["display_name"] == "Cash (USD)" else float(row["avg_price"] or 0)
+            lp.append(fb); pc.append(fb); ps.append("fallback"); fa.append("")
+    enriched["latest_price"] = lp; enriched["previous_close"] = pc
+    enriched["price_source"] = ps; enriched["fetched_at"] = fa
     enriched["current_value"] = enriched["quantity"] * enriched["latest_price"]
     enriched["current_value"] = enriched["current_value"].where(enriched["quantity"] > 0, enriched["amount_invested"])
     enriched["total_pnl"] = enriched["current_value"] - enriched["amount_invested"]
-    enriched["total_pnl_pct"] = enriched.apply(
-        lambda row: safe_div(row["total_pnl"], row["amount_invested"]) if row["amount_invested"] else 0.0,
-        axis=1,
-    )
+    enriched["total_pnl_pct"] = enriched.apply(lambda r: safe_div(r["total_pnl"], r["amount_invested"]) if r["amount_invested"] else 0.0, axis=1)
     enriched["tdy_pnl"] = (enriched["latest_price"] - enriched["previous_close"]) * enriched["quantity"]
     return enriched
 
 
 def build_account_balances(accounts_df: pd.DataFrame, transactions_df: pd.DataFrame, holdings_df: pd.DataFrame, price_cache_df: pd.DataFrame) -> pd.DataFrame:
     balances = accounts_df.copy()
-    # Use _to_float_series so Arrow-backed Postgres types don't crash
     balances["current_balance"] = _to_float_series(balances["starting_balance"])
-
     if transactions_df.empty:
-        tx_df = pd.DataFrame(columns=["account_id", "to_account_id", "type", "amount", "date", "id"])
+        tx_df = pd.DataFrame(columns=["id", "date", "account_id", "to_account_id", "type", "amount"])
     else:
-        tx_df = transactions_df.copy()
-        tx_df["amount"] = _to_float_series(tx_df["amount"])
-
+        tx_df = transactions_df.copy(); tx_df["amount"] = _to_float_series(tx_df["amount"])
     debt_ids = set(balances.loc[balances["is_debt"] == 1, "id"].astype(int))
-    current_balances = {int(row["id"]): coerce_float(row["starting_balance"]) for _, row in balances.iterrows()}
-
+    cb = {int(r["id"]): coerce_float(r["starting_balance"]) for _, r in balances.iterrows()}
     for _, tx in tx_df.sort_values(by=["date", "id"]).iterrows():
-        account_id = int(tx["account_id"])
-        to_account_id = int(tx["to_account_id"]) if pd.notna(tx["to_account_id"]) else None
-        amount = float(tx["amount"])
-        tx_type = str(tx["type"])
-
-        if account_id in debt_ids:
-            if tx_type == "Expense":
-                current_balances[account_id] += amount
-            elif tx_type == "Income":
-                current_balances[account_id] -= amount
-            elif tx_type == "Transfer":
-                current_balances[account_id] += amount
+        aid = int(tx["account_id"]); taid = int(tx["to_account_id"]) if pd.notna(tx["to_account_id"]) else None
+        amt = float(tx["amount"]); tt = str(tx["type"])
+        if aid in debt_ids:
+            if tt == "Expense": cb[aid] += amt
+            elif tt == "Income": cb[aid] -= amt
+            elif tt == "Transfer": cb[aid] += amt
         else:
-            if tx_type == "Expense":
-                current_balances[account_id] -= amount
-            elif tx_type == "Income":
-                current_balances[account_id] += amount
-            elif tx_type == "Transfer":
-                current_balances[account_id] -= amount
-
-        if to_account_id:
-            if to_account_id in debt_ids:
-                current_balances[to_account_id] -= amount
-            else:
-                current_balances[to_account_id] += amount
-
-    balances["current_balance"] = balances["id"].map(current_balances).astype(float)
-
-    holdings_value_by_account = {}
+            if tt == "Expense": cb[aid] -= amt
+            elif tt == "Income": cb[aid] += amt
+            elif tt == "Transfer": cb[aid] -= amt
+        if taid: cb[taid] = cb.get(taid, 0.0) + (-amt if taid in debt_ids else amt)
+    balances["current_balance"] = balances["id"].map(cb).astype(float)
+    hv = {}
     if not holdings_df.empty:
         enriched = build_enriched_holdings(holdings_df, price_cache_df)
-        holdings_value_by_account = (
-            enriched.groupby("account_id", dropna=False)["current_value"].sum().to_dict()
-        )
-
+        hv = enriched.groupby("account_id", dropna=False)["current_value"].sum().to_dict()
     for idx, row in balances.iterrows():
-        if row["account_type"] == "investment" and row["id"] in holdings_value_by_account:
-            balances.at[idx, "display_balance"] = holdings_value_by_account[row["id"]]
-        else:
-            balances.at[idx, "display_balance"] = row["current_balance"]
-
+        balances.at[idx, "display_balance"] = hv[row["id"]] if row["account_type"] == "investment" and row["id"] in hv else row["current_balance"]
     return balances
 
 
 def build_food_metrics(transactions_df: pd.DataFrame, settings: dict[str, str]) -> dict[str, Any]:
-    daily_budget = get_setting_float(settings, "daily_food_budget")
-    today = date.today()
-    week_start = today - timedelta(days=today.weekday())
+    db = get_setting_float(settings, "daily_food_budget")
+    today = date.today(); ws = today - timedelta(days=today.weekday())
     food_df = transactions_df.loc[transactions_df["category"].eq("Food")].copy() if not transactions_df.empty else pd.DataFrame()
-
-    today_spent = 0.0
-    week_spent = 0.0
-    total_food_spent = 0.0
-    current_carry = 0.0
-    lifetime_surplus = 0.0
-    active_days = 0
-    avg_daily_food = 0.0
-
+    ts = ws_spent = tfs = cc = ls = adf = 0.0; ad = 0
     if not food_df.empty:
         food_df["date"] = pd.to_datetime(food_df["date"]).dt.date
-        today_spent = float(food_df.loc[food_df["date"] == today, "amount"].sum())
-        week_spent = float(food_df.loc[food_df["date"] >= week_start, "amount"].sum())
-        total_food_spent = float(food_df["amount"].sum())
-
-        start_day = min(food_df["date"].min(), today)
-        all_days = pd.date_range(start=start_day, end=today, freq="D")
-        daily_spend = food_df.groupby("date")["amount"].sum().reindex(all_days.date, fill_value=0.0)
-        carry = 0.0
-        lifetime = 0.0
-        for day_spend in daily_spend:
-            carry += daily_budget
-            carry -= float(day_spend)
-            lifetime += max(daily_budget - float(day_spend), 0.0)
-        current_carry = carry
-        lifetime_surplus = lifetime
-        active_days = len(all_days)
-        avg_daily_food = safe_div(total_food_spent, active_days)
-
+        ts = float(food_df.loc[food_df["date"] == today, "amount"].sum())
+        ws_spent = float(food_df.loc[food_df["date"] >= ws, "amount"].sum())
+        tfs = float(food_df["amount"].sum())
+        all_days = pd.date_range(start=min(food_df["date"].min(), today), end=today, freq="D")
+        ds = food_df.groupby("date")["amount"].sum().reindex(all_days.date, fill_value=0.0)
+        carry = life = 0.0
+        for x in ds: carry += db - float(x); life += max(db - float(x), 0.0)
+        cc = carry; ls = life; ad = len(all_days); adf = safe_div(tfs, ad)
     return {
-        "daily_budget": daily_budget,
-        "weekly_budget": daily_budget * 7,
-        "food_spent_today": today_spent,
-        "food_spent_week": week_spent,
-        "remaining_today": daily_budget - today_spent,
-        "remaining_week": (daily_budget * 7) - week_spent,
-        "current_carry_surplus": current_carry,
-        "lifetime_surplus": lifetime_surplus,
-        "avg_daily_food_spend": avg_daily_food,
-        "food_days_tracked": active_days,
-        "transactions_today": int(
-            0 if transactions_df.empty else (pd.to_datetime(transactions_df["date"]).dt.date == today).sum()
-        ),
+        "daily_budget": db, "weekly_budget": db * 7,
+        "food_spent_today": ts, "food_spent_week": ws_spent,
+        "remaining_today": db - ts, "remaining_week": (db * 7) - ws_spent,
+        "current_carry_surplus": cc, "lifetime_surplus": ls,
+        "avg_daily_food_spend": adf, "food_days_tracked": ad,
+        "transactions_today": int(0 if transactions_df.empty else (pd.to_datetime(transactions_df["date"]).dt.date == today).sum()),
     }
 
 
 def build_runway(transactions_df: pd.DataFrame, balances_df: pd.DataFrame, food_metrics: dict[str, Any]) -> dict[str, float]:
-    liquid_cash = float(
-        balances_df.loc[balances_df["include_in_runway"] == 1, "display_balance"].sum()
-    )
+    lc = float(balances_df.loc[balances_df["include_in_runway"] == 1, "display_balance"].sum())
     if transactions_df.empty:
-        avg_daily_spending = food_metrics["avg_daily_food_spend"]
+        avg = food_metrics["avg_daily_food_spend"]
     else:
-        spend_df = transactions_df.loc[transactions_df["type"].eq("Expense")].copy()
-        spend_df["date"] = pd.to_datetime(spend_df["date"]).dt.date
-        trailing_start = date.today() - timedelta(days=29)
-        trailing_df = spend_df.loc[spend_df["date"] >= trailing_start]
-        if trailing_df.empty:
-            avg_daily_spending = food_metrics["avg_daily_food_spend"]
-        else:
-            total_spend = float(trailing_df["amount"].sum())
-            avg_daily_spending = total_spend / 30.0
-    runway_days = safe_div(liquid_cash, avg_daily_spending)
-    return {
-        "liquid_cash": liquid_cash,
-        "avg_daily_spending": avg_daily_spending,
-        "runway_days": runway_days,
-    }
+        sd = transactions_df.loc[transactions_df["type"].eq("Expense")].copy()
+        sd["date"] = pd.to_datetime(sd["date"]).dt.date
+        td = sd.loc[sd["date"] >= date.today() - timedelta(days=29)]
+        avg = float(td["amount"].sum()) / 30.0 if not td.empty else food_metrics["avg_daily_food_spend"]
+    return {"liquid_cash": lc, "avg_daily_spending": avg, "runway_days": safe_div(lc, avg)}
 
 
 def build_debt_summary(balances_df: pd.DataFrame) -> dict[str, Any]:
-    debt_df = balances_df.loc[balances_df["is_debt"] == 1, ["id", "name", "display_balance"]].copy()
-    debt_df["display_balance"] = _to_float_series(debt_df["display_balance"])
-    debt_df["display_balance"] = debt_df["display_balance"].clip(lower=0)
-    return {
-        "total_debt": float(debt_df["display_balance"].sum()),
-        "by_account": debt_df.sort_values("display_balance", ascending=False),
-    }
+    ddf = balances_df.loc[balances_df["is_debt"] == 1, ["id", "name", "display_balance"]].copy()
+    ddf["display_balance"] = _to_float_series(ddf["display_balance"]).clip(lower=0)
+    return {"total_debt": float(ddf["display_balance"].sum()), "by_account": ddf.sort_values("display_balance", ascending=False)}
 
 
-def build_signals(
-    balances_df: pd.DataFrame,
-    debt_summary: dict[str, Any],
-    food_metrics: dict[str, Any],
-    runway: dict[str, Any],
-    settings: dict[str, str],
-) -> list[Signal]:
+def build_signals(balances_df, debt_summary, food_metrics, runway, settings) -> list[Signal]:
     signals: list[Signal] = []
-    checking_balance = float(
-        balances_df.loc[balances_df["name"].eq("Checking"), "display_balance"].sum()
-    )
+    checking = float(balances_df.loc[balances_df["name"].eq("Checking"), "display_balance"].sum())
     due_day = int(get_setting_float(settings, "due_day") or 27)
-    statement_day = int(get_setting_float(settings, "statement_day") or 2)
+    stmt_day = int(get_setting_float(settings, "statement_day") or 2)
     today = date.today()
-    due_date = date(today.year, today.month, min(due_day, 28))
+    dd = date(today.year, today.month, min(due_day, 28))
     if today.day > due_day:
-        next_month = today.replace(day=28) + timedelta(days=4)
-        due_date = date(next_month.year, next_month.month, min(due_day, 28))
-    days_to_due = (due_date - today).days
-
-    if food_metrics["remaining_today"] < 0:
-        signals.append(Signal("danger", "⚠ Food overspent today", "You are over the daily food cap. Pull back the next meal or use carried surplus carefully."))
-    elif food_metrics["remaining_week"] < 0:
-        signals.append(Signal("warning", "⚠ Food budget is behind this week", "Weekly food spend is over budget. Use a cheaper stretch until payday."))
-
+        nm = today.replace(day=28) + timedelta(days=4); dd = date(nm.year, nm.month, min(due_day, 28))
+    dtd = (dd - today).days
+    if food_metrics["remaining_today"] < 0: signals.append(Signal("danger", "⚠ Food overspent today", "Over the daily cap."))
+    elif food_metrics["remaining_week"] < 0: signals.append(Signal("warning", "⚠ Food budget behind", "Weekly spend over budget."))
     if debt_summary["total_debt"] > runway["liquid_cash"] * 0.75 and debt_summary["total_debt"] > 0:
-        signals.append(Signal("danger", "⚠ Debt pressure is high", "Credit card debt is large relative to liquid cash. Keep the next paycheck debt-heavy."))
+        signals.append(Signal("danger", "⚠ Debt pressure high", "Debt large relative to cash. Keep next paycheck debt-heavy."))
     elif debt_summary["total_debt"] > 0:
-        signals.append(Signal("warning", "⚠ Debt still needs room in the next allocation", "Debt is active. The paycheck engine will reserve a proportional payment first."))
-
-    if days_to_due <= 5 and debt_summary["total_debt"] > 0:
-        signals.append(Signal("warning", "📅 Payment due soon", f"Card payments are due in {days_to_due} day(s). Make sure the allocated debt payment gets posted on time."))
-
-    if today.day <= statement_day + 2 and debt_summary["total_debt"] > 0:
-        signals.append(Signal("warning", "🧾 Statement window is open", "Fresh statement balances are likely available. Review debt totals before locking in your next paycheck allocation."))
-
-    if checking_balance < 50:
-        signals.append(Signal("danger", "💸 Checking is running low", "Checking is below $50. Protect essentials and move cash only if it does not hurt debt timing."))
-
-    if runway["runway_days"] < 14:
-        signals.append(Signal("danger", "🛣 Runway is short", "Current liquid cash covers less than two weeks of spending. Keep discretionary spending tight."))
-    elif runway["runway_days"] < 30:
-        signals.append(Signal("warning", "🛣 Runway needs work", "You have less than a month of runway. Prioritize savings after food and debt."))
-
-    if food_metrics["current_carry_surplus"] > food_metrics["daily_budget"] * 3:
-        signals.append(Signal("success", "🍽 Food discipline is paying off", "You have built a healthy carried food surplus. Keep stacking the easy wins."))
-
-    if not signals:
-        signals.append(Signal("success", "💰 Budget looks steady", "No immediate pressure signals. Keep logging moves and let the system do the math."))
-    severity = {"danger": 0, "warning": 1, "success": 2}
-    return sorted(signals, key=lambda s: severity[s.level])
+        signals.append(Signal("warning", "⚠ Debt needs room", "Paycheck engine will reserve a payment first."))
+    if dtd <= 5 and debt_summary["total_debt"] > 0: signals.append(Signal("warning", "📅 Payment due soon", f"Due in {dtd} day(s)."))
+    if today.day <= stmt_day + 2 and debt_summary["total_debt"] > 0: signals.append(Signal("warning", "🧾 Statement window open", "Review balances before next allocation."))
+    if checking < 50: signals.append(Signal("danger", "💸 Checking running low", "Below $50. Protect essentials."))
+    if runway["runway_days"] < 14: signals.append(Signal("danger", "🛣 Runway short", "Under two weeks of runway."))
+    elif runway["runway_days"] < 30: signals.append(Signal("warning", "🛣 Runway needs work", "Under a month of runway."))
+    if food_metrics["current_carry_surplus"] > food_metrics["daily_budget"] * 3: signals.append(Signal("success", "🍽 Food discipline paying off", "Healthy carry surplus built."))
+    if not signals: signals.append(Signal("success", "💰 Budget steady", "No pressure signals. Keep logging."))
+    return sorted(signals, key=lambda s: {"danger": 0, "warning": 1, "success": 2}[s.level])
 
 
-def compute_paycheck_allocation(
-    paycheck_amount: float,
-    settings: dict[str, str],
-    debt_df: pd.DataFrame,
-) -> dict[str, Any]:
-    pay_period_days = int(get_setting_float(settings, "pay_period_days") or 14)
-    food_reserved = max(get_setting_float(settings, "daily_food_budget") * pay_period_days, 0.0)
-    remaining_after_food = max(paycheck_amount - food_reserved, 0.0)
-    total_debt = float(debt_df["display_balance"].sum()) if not debt_df.empty else 0.0
-    debt_reserved = min(total_debt, remaining_after_food)
-    remaining_after_debt = max(remaining_after_food - debt_reserved, 0.0)
-
-    savings_reserved = remaining_after_debt * get_setting_float(settings, "savings_pct")
-    spending_reserved = remaining_after_debt * get_setting_float(settings, "spending_pct")
-    crypto_reserved = remaining_after_debt * get_setting_float(settings, "crypto_pct")
-    taxable_reserved = remaining_after_debt * get_setting_float(settings, "taxable_investing_pct")
-    roth_reserved = remaining_after_debt * get_setting_float(settings, "roth_ira_pct")
-
-    debt_breakdown: list[dict[str, Any]] = []
-    if total_debt > 0 and debt_reserved > 0 and not debt_df.empty:
-        debt_df = debt_df.copy()
-        debt_df["share"] = debt_df["display_balance"] / total_debt
-        for _, row in debt_df.iterrows():
-            debt_breakdown.append(
-                {
-                    "account_id": int(row["id"]),
-                    "account": row["name"],
-                    "debt_balance": float(row["display_balance"]),
-                    "allocation": float(debt_reserved * row["share"]),
-                }
-            )
-
+def compute_paycheck_allocation(paycheck_amount: float, settings: dict[str, str], debt_df: pd.DataFrame) -> dict[str, Any]:
+    ppd = int(get_setting_float(settings, "pay_period_days") or 14)
+    fr = max(get_setting_float(settings, "daily_food_budget") * ppd, 0.0)
+    raf = max(paycheck_amount - fr, 0.0)
+    td = float(debt_df["display_balance"].sum()) if not debt_df.empty else 0.0
+    dr = min(td, raf); rad = max(raf - dr, 0.0)
+    bd: list[dict[str, Any]] = []
+    if td > 0 and dr > 0 and not debt_df.empty:
+        tmp = debt_df.copy(); tmp["share"] = tmp["display_balance"] / td
+        for _, r in tmp.iterrows():
+            bd.append({"account_id": int(r["id"]), "account": r["name"], "debt_balance": float(r["display_balance"]), "allocation": float(dr * r["share"])})
     return {
-        "paycheck_amount": paycheck_amount,
-        "run_date": date.today().strftime(DATE_FMT),
-        "debt_total": total_debt,
-        "food_reserved": food_reserved,
-        "debt_reserved": debt_reserved,
-        "remaining_after_food": remaining_after_food,
-        "remaining_after_debt": remaining_after_debt,
-        "savings_reserved": savings_reserved,
-        "spending_reserved": spending_reserved,
-        "crypto_reserved": crypto_reserved,
-        "taxable_reserved": taxable_reserved,
-        "roth_reserved": roth_reserved,
-        "debt_breakdown": debt_breakdown,
-        "meta": {
-            "pay_period_days": pay_period_days,
-            "allocation_mode": settings.get("debt_allocation_mode", "proportional"),
-        },
+        "paycheck_amount": paycheck_amount, "run_date": date.today().strftime(DATE_FMT),
+        "debt_total": td, "food_reserved": fr, "debt_reserved": dr,
+        "remaining_after_food": raf, "remaining_after_debt": rad,
+        "savings_reserved": rad * get_setting_float(settings, "savings_pct"),
+        "spending_reserved": rad * get_setting_float(settings, "spending_pct"),
+        "crypto_reserved": rad * get_setting_float(settings, "crypto_pct"),
+        "taxable_reserved": rad * get_setting_float(settings, "taxable_investing_pct"),
+        "roth_reserved": rad * get_setting_float(settings, "roth_ira_pct"),
+        "debt_breakdown": bd,
+        "meta": {"pay_period_days": ppd, "allocation_mode": settings.get("debt_allocation_mode", "proportional")},
     }
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_yfinance_prices(symbols: tuple[str, ...]) -> dict[str, dict[str, float | None]]:
     prices: dict[str, dict[str, float | None]] = {}
-    if not symbols:
-        return prices
+    if not symbols: return prices
     tickers = yf.Tickers(" ".join(symbols))
     for symbol in symbols:
-        info = {"price": None, "previous_close": None}
+        info: dict[str, float | None] = {"price": None, "previous_close": None}
         try:
             hist = tickers.tickers[symbol].history(period="2d", interval="1d", auto_adjust=False)
             if not hist.empty:
                 info["price"] = float(hist["Close"].iloc[-1])
-                if len(hist) > 1:
-                    info["previous_close"] = float(hist["Close"].iloc[-2])
-                else:
-                    info["previous_close"] = float(hist["Close"].iloc[-1])
-        except Exception:
-            pass
+                info["previous_close"] = float(hist["Close"].iloc[-2]) if len(hist) > 1 else float(hist["Close"].iloc[-1])
+        except Exception: pass
         prices[symbol] = info
     return prices
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_coingecko_prices(ids: tuple[str, ...]) -> dict[str, dict[str, float | None]]:
-    prices: dict[str, dict[str, float | None]] = {coin_id: {"price": None, "previous_close": None} for coin_id in ids}
-    ids = tuple(coin_id for coin_id in ids if coin_id)
-    if not ids:
-        return prices
-    response = requests.get(
-        "https://api.coingecko.com/api/v3/simple/price",
-        params={
-            "ids": ",".join(ids),
-            "vs_currencies": "usd",
-            "include_24hr_change": "true",
-        },
-        timeout=15,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    for coin_id in ids:
-        data = payload.get(coin_id, {})
-        price = data.get("usd")
-        change = data.get("usd_24h_change")
-        previous_close = None
+    prices: dict[str, dict[str, float | None]] = {cid: {"price": None, "previous_close": None} for cid in ids}
+    ids = tuple(cid for cid in ids if cid)
+    if not ids: return prices
+    r = requests.get("https://api.coingecko.com/api/v3/simple/price",
+                     params={"ids": ",".join(ids), "vs_currencies": "usd", "include_24hr_change": "true"}, timeout=15)
+    r.raise_for_status()
+    for cid in ids:
+        data = r.json().get(cid, {}); price = data.get("usd"); change = data.get("usd_24h_change")
+        prev = None
         if price is not None and change is not None:
-            try:
-                previous_close = float(price) / (1 + (float(change) / 100))
-            except ZeroDivisionError:
-                previous_close = float(price)
-        prices[coin_id] = {
-            "price": float(price) if price is not None else None,
-            "previous_close": previous_close,
-        }
+            try: prev = float(price) / (1 + float(change) / 100)
+            except ZeroDivisionError: prev = float(price)
+        prices[cid] = {"price": float(price) if price is not None else None, "previous_close": prev}
     return prices
 
 
 def maybe_refresh_prices(holdings_df: pd.DataFrame, force: bool = False) -> tuple[bool, str]:
-    if holdings_df.empty:
-        return False, "No holdings to refresh yet."
-
-    settings = get_settings()
-    last_refresh = settings.get("last_price_refresh_at", "")
-    now = datetime.now()
-    market_close_passed = now.time() >= time(hour=16, minute=15)
-    already_refreshed_today = last_refresh.startswith(date.today().strftime(DATE_FMT))
-    should_refresh = force or (market_close_passed and not already_refreshed_today)
-    if not should_refresh:
-        return False, "Using cached prices."
-
-    stock_symbols = tuple(sorted(set(holdings_df.loc[holdings_df["asset_type"].isin(["stock", "etf"]), "symbol"].astype(str))))
-    crypto_rows = holdings_df.loc[holdings_df["asset_type"].eq("crypto") & holdings_df["coingecko_id"].fillna("").ne("")]
-    coin_ids = tuple(sorted(set(crypto_rows["coingecko_id"].astype(str))))
-
-    stock_prices = fetch_yfinance_prices(stock_symbols)
-    crypto_prices = {}
+    if holdings_df.empty: return False, "No holdings to refresh yet."
+    settings = get_settings(); now = datetime.now()
+    mcp = now.time() >= time(hour=16, minute=15)
+    ard = settings.get("last_price_refresh_at", "").startswith(date.today().strftime(DATE_FMT))
+    if not (force or (mcp and not ard)): return False, "Using cached prices."
+    stock_syms = tuple(sorted(set(holdings_df.loc[holdings_df["asset_type"].isin(["stock","etf"]),"symbol"].astype(str))))
+    cr = holdings_df.loc[holdings_df["asset_type"].eq("crypto") & holdings_df["coingecko_id"].fillna("").ne("")]
+    coin_ids = tuple(sorted(set(cr["coingecko_id"].astype(str))))
+    sp = fetch_yfinance_prices(stock_syms); cp = {}
     if coin_ids:
-        try:
-            crypto_prices = fetch_coingecko_prices(coin_ids)
-        except Exception:
-            crypto_prices = {}
-
-    as_of_date = date.today().strftime(DATE_FMT)
-    refreshed = 0
+        try: cp = fetch_coingecko_prices(coin_ids)
+        except Exception: pass
+    aod = date.today().strftime(DATE_FMT); refreshed = 0
     for _, row in holdings_df.iterrows():
-        symbol = str(row["symbol"])
-        asset_type = str(row["asset_type"])
-        if asset_type in {"stock", "etf"}:
-            price_info = stock_prices.get(symbol, {})
-            price = price_info.get("price")
-            previous_close = price_info.get("previous_close")
-            source = "yfinance"
-        elif asset_type == "crypto":
-            coin_id = str(row.get("coingecko_id") or "")
-            price_info = crypto_prices.get(coin_id, {})
-            price = price_info.get("price")
-            previous_close = price_info.get("previous_close")
-            source = "coingecko"
-        else:
-            price = row["avg_price"] or 1.0
-            previous_close = row["avg_price"] or 1.0
-            source = "internal"
-
-        if price is None:
-            continue
-        upsert_price(symbol, asset_type, float(price), float(previous_close) if previous_close else None, source, as_of_date)
-        refreshed += 1
-
+        sym = str(row["symbol"]); at = str(row["asset_type"])
+        if at in {"stock","etf"}: pi=sp.get(sym,{}); price=pi.get("price"); prev=pi.get("previous_close"); src="yfinance"
+        elif at == "crypto": cid=str(row.get("coingecko_id") or ""); pi=cp.get(cid,{}); price=pi.get("price"); prev=pi.get("previous_close"); src="coingecko"
+        else: price=row["avg_price"] or 1.0; prev=row["avg_price"] or 1.0; src="internal"
+        if price is None: continue
+        upsert_price(sym, at, float(price), float(prev) if prev else None, src, aod); refreshed += 1
     set_settings({"last_price_refresh_at": now.isoformat(timespec="seconds")})
     return True, f"Refreshed {refreshed} holding price(s)."
 
@@ -1396,38 +890,27 @@ def build_net_worth(balances_df: pd.DataFrame) -> dict[str, float]:
 
 
 def prepare_report_frames(transactions_df: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    if transactions_df.empty:
-        empty = pd.DataFrame()
-        return {"spending": empty, "food": empty}
+    if transactions_df.empty: return {"spending": pd.DataFrame(), "food": pd.DataFrame()}
+    tx = transactions_df.copy(); tx["date"] = pd.to_datetime(tx["date"])
+    return {"spending": tx.loc[tx["type"] == "Expense"].copy(), "food": tx.loc[tx["category"] == "Food"].copy()}
 
-    tx = transactions_df.copy()
-    tx["date"] = pd.to_datetime(tx["date"])
-    spend = tx.loc[tx["type"] == "Expense"].copy()
-    food = tx.loc[tx["category"] == "Food"].copy()
-    return {"spending": spend, "food": food}
 
+# ── Renderers ─────────────────────────────────────────────────────────────────
 
 def render_signal(signal: Signal) -> None:
-    level_class = f"term-signal-{signal.level}"
-    title_text = signal.title.split(" ", 1)[-1] if signal.title[0] in "⚠📅🧾💸🛣🍽💰💳" else signal.title
+    colors = {"danger": C_RED, "warning": C_GOLD, "success": C_GREEN}
+    c = colors[signal.level]
+    title_text = signal.title.split(" ", 1)[-1] if signal.title and signal.title[0] in "⚠📅🧾💸🛣🍽💰💳" else signal.title
     st.markdown(
-        f"""
-        <div class="term-signal {level_class}">
-            <span class="term-signal-title">{title_text}</span>
-            <span class="term-signal-body">{signal.body}</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+        f'<div style="border-left:2px solid {c};padding:0.55rem 1rem;background:rgba(255,255,255,0.015);'
+        f'margin-bottom:1rem;display:flex;gap:1rem;align-items:baseline">'
+        f'<span style="font-family:JetBrains Mono,monospace;font-size:0.65rem;font-weight:700;'
+        f'text-transform:uppercase;letter-spacing:0.12em;color:{c};white-space:nowrap">{title_text}</span>'
+        f'<span style="font-size:0.78rem;color:#6b7280">{signal.body}</span></div>',
+        unsafe_allow_html=True)
 
 
-def render_dashboard(
-    settings: dict[str, str],
-    transactions_df: pd.DataFrame,
-    holdings_df: pd.DataFrame,
-    balances_df: pd.DataFrame,
-    price_cache_df: pd.DataFrame,
-) -> None:
+def render_dashboard(settings, transactions_df, holdings_df, balances_df, price_cache_df) -> None:
     food = build_food_metrics(transactions_df, settings)
     runway = build_runway(transactions_df, balances_df, food)
     debt = build_debt_summary(balances_df)
@@ -1435,9 +918,12 @@ def render_dashboard(
     signals = build_signals(balances_df, debt, food, runway, settings)
     latest_allocation = load_allocation_snapshots(limit=1)
 
-    st.title("Black Book")
+    # ── Title
+    st.markdown('<div class="bb-title">Black Book</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="bb-subtitle">Personal Finance · {date.today().strftime("%B %d, %Y")}</div>', unsafe_allow_html=True)
     render_signal(signals[0])
 
+    # ── Top metrics
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Daily Food Left", format_currency(food["remaining_today"]), format_currency(-food["food_spent_today"]))
     m2.metric("Weekly Food Left", format_currency(food["remaining_week"]), format_currency(-food["food_spent_week"]))
@@ -1447,118 +933,97 @@ def render_dashboard(
     s1, s2, s3, s4 = st.columns(4)
     s1.metric("Total Debt", format_currency(debt["total_debt"]))
     s2.metric("Food Surplus", format_currency(food["current_carry_surplus"]))
-    s3.metric("Lifetime Food Surplus", format_currency(food["lifetime_surplus"]))
-    s4.metric("Transactions Today", str(food["transactions_today"]))
+    s3.metric("Lifetime Surplus", format_currency(food["lifetime_surplus"]))
+    s4.metric("Txns Today", str(food["transactions_today"]))
 
     left, right = st.columns([1.1, 0.9])
 
     with left:
         st.subheader("Accounts")
-        acct_names = [str(x) for x in balances_df.sort_values("sort_order")["name"].tolist()]
-        acct_bals  = [float(x) for x in balances_df.sort_values("sort_order")["display_balance"].tolist()]
-        acct_types = [
-            "Debt" if int(r["is_debt"]) else str(r["account_type"]).title()
-            for _, r in balances_df.sort_values("sort_order").iterrows()
-        ]
+        sorted_bal = balances_df.sort_values("sort_order")
         acct_display = pd.DataFrame({
-            "Account": acct_names,
-            "Balance": [format_currency(b) for b in acct_bals],
-            "Type": acct_types,
+            "Account": [str(x) for x in sorted_bal["name"].tolist()],
+            "Balance": [format_currency(float(x)) for x in sorted_bal["display_balance"].tolist()],
+            "Type": ["Debt" if int(r["is_debt"]) else str(r["account_type"]).title() for _, r in sorted_bal.iterrows()],
         })
         st.dataframe(acct_display, use_container_width=True, hide_index=True)
 
+        st.subheader("Recent Money Moves")
+        recent = transactions_df.head(8).copy() if not transactions_df.empty else pd.DataFrame()
+        if recent.empty:
+            st.info("No transactions logged yet.")
+        else:
+            recent["date"] = pd.to_datetime(recent["date"]).dt.strftime("%Y-%m-%d")
+            recent["amount"] = recent["amount"].map(format_currency)
+            st.dataframe(recent[["date", "description", "category", "amount", "account", "type", "to_account"]],
+                         use_container_width=True, hide_index=True)
+
     with right:
         reports = prepare_report_frames(transactions_df)
+
         if not reports["spending"].empty:
             st.subheader("Spending Mix")
-            spend_cat = reports["spending"].groupby("category", as_index=False)["amount"].sum()
-            fig = px.pie(spend_cat, names="category", values="amount", hole=0.5)
-            _chart_theme(fig)
+            sc = reports["spending"].groupby("category", as_index=False)["amount"].sum()
+            fig = _pie_chart(sc["category"].tolist(), sc["amount"].tolist())
             st.plotly_chart(fig, use_container_width=True)
 
-        food_trend = reports["food"]
-        if not food_trend.empty:
+        if not reports["food"].empty:
             st.subheader("Food Trend")
-            daily_food = food_trend.groupby(food_trend["date"].dt.date, as_index=False)["amount"].sum()
-            fig = px.bar(daily_food, x="date", y="amount", color_discrete_sequence=["#00c896"])
-            _chart_theme(fig)
+            daily_food = reports["food"].groupby(reports["food"]["date"].dt.date, as_index=False)["amount"].sum()
+            fig = _bar_chart(daily_food["date"].tolist(), daily_food["amount"].tolist(),
+                             color=C_GREEN, hline=get_setting_float(settings, "daily_food_budget"))
             st.plotly_chart(fig, use_container_width=True)
 
         st.subheader("Last Paycheck")
         if latest_allocation.empty:
-            debt_df = debt["by_account"]
-            preview = compute_paycheck_allocation(580.0, settings, debt_df)
+            preview = compute_paycheck_allocation(580.0, settings, debt["by_account"])
             st.caption("Preview — no snapshot saved yet.")
         else:
             preview = latest_allocation.iloc[0].to_dict()
-        alloc_df = pd.DataFrame(
-            [
-                ("Food", preview["food_reserved"]),
-                ("Debt", preview["debt_reserved"]),
-                ("Savings", preview["savings_reserved"]),
-                ("Spending", preview["spending_reserved"]),
-                ("Crypto", preview["crypto_reserved"]),
-                ("Taxable", preview.get("taxable_reserved", 0.0)),
-                ("Roth IRA", preview.get("roth_reserved", 0.0)),
-            ],
-            columns=["Bucket", "Amount"],
-        )
-        st.dataframe(
-            alloc_df.assign(Amount=alloc_df["Amount"].map(format_currency)),
-            use_container_width=True,
-            hide_index=True,
-        )
+        alloc_df = pd.DataFrame([
+            ("Food", preview["food_reserved"]), ("Debt", preview["debt_reserved"]),
+            ("Savings", preview["savings_reserved"]), ("Spending", preview["spending_reserved"]),
+            ("Crypto", preview["crypto_reserved"]), ("Taxable", preview.get("taxable_reserved", 0.0)),
+            ("Roth IRA", preview.get("roth_reserved", 0.0)),
+        ], columns=["Bucket", "Amount"])
+        st.dataframe(alloc_df.assign(Amount=alloc_df["Amount"].map(format_currency)), use_container_width=True, hide_index=True)
 
 
 def render_log_transaction(accounts_df: pd.DataFrame) -> None:
-    st.title("Log Transaction")
-
-    account_name_to_id = dict(zip(
-        accounts_df.sort_values("sort_order")["name"],
-        accounts_df.sort_values("sort_order")["id"],
-    ))
+    st.markdown('<div class="bb-title">Log Transaction</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="bb-subtitle">Record a money move</div>', unsafe_allow_html=True)
+    sorted_accts = accounts_df.sort_values("sort_order")
+    names = [str(x) for x in sorted_accts["name"].tolist()]
+    ids = [int(x) for x in sorted_accts["id"].tolist()]
+    account_name_to_id = dict(zip(names, ids))
     with st.form("transaction_form", clear_on_submit=True):
         c1, c2, c3 = st.columns([1, 2, 1])
         tx_date = c1.date_input("Date", value=date.today())
-        description = c2.text_input("Description", placeholder="Chick-fil-A, paycheck, debt payment...")
+        description = c2.text_input("Description", placeholder="Chick-fil-A, paycheck, rent...")
         amount = c3.number_input("Amount", min_value=0.0, step=0.01, format="%.2f")
-
         c4, c5, c6 = st.columns(3)
         category = c4.selectbox("Category", COMMON_CATEGORIES, index=0)
         account = c5.selectbox("Account", list(account_name_to_id))
         tx_type = c6.selectbox("Type", ["Expense", "Income", "Transfer"])
-
         to_account = None
         notes = st.text_area("Notes", placeholder="Optional note...")
         if tx_type == "Transfer":
-            to_account = st.selectbox("To Account", [""] + [name for name in account_name_to_id if name != account])
-
+            to_account = st.selectbox("To Account", [""] + [n for n in account_name_to_id if n != account])
         submitted = st.form_submit_button("Save Transaction", type="primary")
         if submitted:
-            if not description.strip():
-                st.error("Description is required.")
-            elif amount <= 0:
-                st.error("Amount must be greater than zero.")
-            elif tx_type == "Transfer" and not to_account:
-                st.error("Transfers need a destination account.")
+            if not description.strip(): st.error("Description is required.")
+            elif amount <= 0: st.error("Amount must be greater than zero.")
+            elif tx_type == "Transfer" and not to_account: st.error("Transfers need a destination.")
             else:
-                add_transaction(
-                    tx_date=tx_date,
-                    description=description,
-                    category=category,
-                    amount=float(amount),
-                    account_id=int(account_name_to_id[account]),
-                    tx_type=tx_type,
-                    to_account_id=int(account_name_to_id[to_account]) if to_account else None,
-                    notes=notes,
-                )
-                st.success("Transaction saved.")
-                st.rerun()
+                add_transaction(tx_date, description, category, float(amount),
+                                int(account_name_to_id[account]), tx_type,
+                                int(account_name_to_id[to_account]) if to_account else None, notes)
+                st.success("Transaction saved."); st.rerun()
 
 
 def render_paycheck_allocation(settings: dict[str, str], balances_df: pd.DataFrame) -> None:
-    st.title("Paycheck Allocation")
-
+    st.markdown('<div class="bb-title">Paycheck Allocation</div>', unsafe_allow_html=True)
+    st.markdown('<div class="bb-subtitle">Break down your next deposit</div>', unsafe_allow_html=True)
     debt_df = build_debt_summary(balances_df)["by_account"]
     c1, c2 = st.columns([0.9, 1.1])
     with c1:
@@ -1566,348 +1031,207 @@ def render_paycheck_allocation(settings: dict[str, str], balances_df: pd.DataFra
         allocation = compute_paycheck_allocation(float(paycheck_amount), settings, debt_df)
         st.metric("Debt Total", format_currency(allocation["debt_total"]))
         st.metric("Food Reserve", format_currency(allocation["food_reserved"]))
-        st.metric("Remaining After Food", format_currency(allocation["remaining_after_food"]))
-        st.metric("Remaining After Debt", format_currency(allocation["remaining_after_debt"]))
-        if st.button("Save Allocation Snapshot", type="primary"):
-            save_allocation_snapshot(allocation)
-            st.success("Paycheck allocation saved.")
-            st.rerun()
-
+        st.metric("After Food", format_currency(allocation["remaining_after_food"]))
+        st.metric("After Debt", format_currency(allocation["remaining_after_debt"]))
+        if st.button("Save Snapshot", type="primary"):
+            save_allocation_snapshot(allocation); st.success("Saved."); st.rerun()
     with c2:
-        alloc_rows = [
-            ("Food", allocation["food_reserved"]),
-            ("Debt", allocation["debt_reserved"]),
-            ("Savings", allocation["savings_reserved"]),
-            ("Spending", allocation["spending_reserved"]),
-            ("Crypto", allocation["crypto_reserved"]),
-            ("Taxable Stocks", allocation["taxable_reserved"]),
-            ("Roth IRA", allocation["roth_reserved"]),
-        ]
+        alloc_rows = [("Food", allocation["food_reserved"]), ("Debt", allocation["debt_reserved"]),
+                      ("Savings", allocation["savings_reserved"]), ("Spending", allocation["spending_reserved"]),
+                      ("Crypto", allocation["crypto_reserved"]), ("Taxable", allocation["taxable_reserved"]),
+                      ("Roth IRA", allocation["roth_reserved"])]
         alloc_df = pd.DataFrame(alloc_rows, columns=["Bucket", "Amount"])
-        alloc_df["Share of Pay"] = alloc_df["Amount"].apply(lambda x: safe_div(x, allocation["paycheck_amount"]))
-        st.dataframe(
-            alloc_df.assign(
-                Amount=alloc_df["Amount"].map(format_currency),
-                **{"Share of Pay": alloc_df["Share of Pay"].map(format_percent)},
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
+        alloc_df["Share"] = alloc_df["Amount"].apply(lambda x: safe_div(x, allocation["paycheck_amount"]))
+        st.dataframe(alloc_df.assign(Amount=alloc_df["Amount"].map(format_currency), Share=alloc_df["Share"].map(format_percent)),
+                     use_container_width=True, hide_index=True)
         if allocation["debt_breakdown"]:
-            st.subheader("Debt Payment Split")
-            debt_breakdown_df = pd.DataFrame(allocation["debt_breakdown"])
-            st.dataframe(
-                debt_breakdown_df.assign(
-                    debt_balance=debt_breakdown_df["debt_balance"].map(format_currency),
-                    allocation=debt_breakdown_df["allocation"].map(format_currency),
-                )[["account", "debt_balance", "allocation"]],
-                use_container_width=True,
-                hide_index=True,
-            )
-
+            st.subheader("Debt Split")
+            dbd = pd.DataFrame(allocation["debt_breakdown"])
+            st.dataframe(dbd.assign(debt_balance=dbd["debt_balance"].map(format_currency), allocation=dbd["allocation"].map(format_currency))[["account","debt_balance","allocation"]],
+                         use_container_width=True, hide_index=True)
     history = load_allocation_snapshots(limit=8)
-    st.subheader("Recent Allocation Snapshots")
+    st.subheader("Recent Snapshots")
     if history.empty:
         st.info("Save a paycheck allocation to build your history.")
     else:
-        display = history[[
-            "run_date",
-            "paycheck_amount",
-            "food_reserved",
-            "debt_reserved",
-            "savings_reserved",
-            "spending_reserved",
-            "crypto_reserved",
-            "taxable_reserved",
-            "roth_reserved",
-        ]].copy()
+        display = history[["run_date","paycheck_amount","food_reserved","debt_reserved","savings_reserved","spending_reserved","crypto_reserved","taxable_reserved","roth_reserved"]].copy()
         for col in display.columns:
-            if col != "run_date":
-                display[col] = display[col].map(format_currency)
+            if col != "run_date": display[col] = display[col].map(format_currency)
         st.dataframe(display, use_container_width=True, hide_index=True)
 
 
 def render_investments(holdings_df: pd.DataFrame, price_cache_df: pd.DataFrame) -> None:
-    st.title("Investments")
-
+    st.markdown('<div class="bb-title">Investments</div>', unsafe_allow_html=True)
+    st.markdown('<div class="bb-subtitle">Portfolio overview</div>', unsafe_allow_html=True)
     if holdings_df.empty:
-        st.info("No holdings available yet. Import your workbook or add holdings directly in the database.")
-        return
-
+        st.info("No holdings yet."); return
     refreshed, message = maybe_refresh_prices(holdings_df, force=False)
-    if refreshed:
-        price_cache_df = load_price_cache()
-    if message:
-        st.caption(message)
-
-    c1, c2 = st.columns([0.7, 0.3])
+    if refreshed: price_cache_df = load_price_cache()
+    if message: st.caption(message)
+    _, c2 = st.columns([0.7, 0.3])
     with c2:
-        if st.button("Refresh Prices Now", type="primary"):
-            _, msg = maybe_refresh_prices(holdings_df, force=True)
-            st.success(msg)
-            st.rerun()
-
+        if st.button("Refresh Prices", type="primary"):
+            _, msg = maybe_refresh_prices(holdings_df, force=True); st.success(msg); st.rerun()
     enriched = build_enriched_holdings(holdings_df, price_cache_df)
-    total_value = float(enriched["current_value"].sum())
-    total_invested = float(enriched["amount_invested"].sum())
-    total_pnl = float(enriched["total_pnl"].sum())
-    today_pnl = float(enriched["tdy_pnl"].sum())
-
+    tv = float(enriched["current_value"].sum()); ti = float(enriched["amount_invested"].sum())
+    tp = float(enriched["total_pnl"].sum()); tdp = float(enriched["tdy_pnl"].sum())
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Portfolio Value", format_currency(total_value))
-    m2.metric("Cost Basis", format_currency(total_invested))
-    m3.metric("Total PnL", format_currency(total_pnl), format_percent(safe_div(total_pnl, total_invested)))
-    m4.metric("Tdy PnL", format_currency(today_pnl))
-
-    tab1, tab2, tab3 = st.tabs(["Tdy PnL", "Total PnL", "Price"])
-
-    with tab1:
-        view = enriched[["display_name", "account", "quantity", "latest_price", "previous_close", "tdy_pnl"]].copy()
-        view["latest_price"] = view["latest_price"].map(format_currency)
-        view["previous_close"] = view["previous_close"].map(format_currency)
-        view["tdy_pnl"] = view["tdy_pnl"].map(format_currency)
-        st.dataframe(view, use_container_width=True, hide_index=True)
-
-    with tab2:
-        view = enriched[["display_name", "account", "amount_invested", "current_value", "total_pnl", "total_pnl_pct"]].copy()
-        view["amount_invested"] = view["amount_invested"].map(format_currency)
-        view["current_value"] = view["current_value"].map(format_currency)
-        view["total_pnl"] = view["total_pnl"].map(format_currency)
-        view["total_pnl_pct"] = view["total_pnl_pct"].map(format_percent)
-        st.dataframe(view, use_container_width=True, hide_index=True)
-
-    with tab3:
-        view = enriched[["display_name", "symbol", "account", "latest_price", "price_source", "fetched_at"]].copy()
-        view["latest_price"] = view["latest_price"].map(format_currency)
-        st.dataframe(view, use_container_width=True, hide_index=True)
-
+    m1.metric("Portfolio Value", format_currency(tv))
+    m2.metric("Cost Basis", format_currency(ti))
+    m3.metric("Total PnL", format_currency(tp), format_percent(safe_div(tp, ti)))
+    m4.metric("Today PnL", format_currency(tdp))
+    t1, t2, t3 = st.tabs(["Today", "Total PnL", "Prices"])
+    with t1:
+        v = enriched[["display_name","account","quantity","latest_price","previous_close","tdy_pnl"]].copy()
+        v["latest_price"]=v["latest_price"].map(format_currency); v["previous_close"]=v["previous_close"].map(format_currency); v["tdy_pnl"]=v["tdy_pnl"].map(format_currency)
+        st.dataframe(v, use_container_width=True, hide_index=True)
+    with t2:
+        v = enriched[["display_name","account","amount_invested","current_value","total_pnl","total_pnl_pct"]].copy()
+        v["amount_invested"]=v["amount_invested"].map(format_currency); v["current_value"]=v["current_value"].map(format_currency)
+        v["total_pnl"]=v["total_pnl"].map(format_currency); v["total_pnl_pct"]=v["total_pnl_pct"].map(format_percent)
+        st.dataframe(v, use_container_width=True, hide_index=True)
+    with t3:
+        v = enriched[["display_name","symbol","account","latest_price","price_source","fetched_at"]].copy()
+        v["latest_price"]=v["latest_price"].map(format_currency)
+        st.dataframe(v, use_container_width=True, hide_index=True)
     st.subheader("Allocation")
-    alloc_col1, alloc_col2 = st.columns(2)
-    with alloc_col1:
-        by_account = enriched.groupby("account", as_index=False)["current_value"].sum()
-        fig = px.pie(by_account, names="account", values="current_value", title="By Account", hole=0.5)
-        _chart_theme(fig)
+    ac1, ac2 = st.columns(2)
+    with ac1:
+        ba = enriched.groupby("account", as_index=False)["current_value"].sum()
+        fig = _pie_chart(ba["account"].tolist(), ba["current_value"].tolist(), "By Account")
         st.plotly_chart(fig, use_container_width=True)
-    with alloc_col2:
-        by_asset = enriched.groupby("asset_type", as_index=False)["current_value"].sum()
-        fig = px.pie(by_asset, names="asset_type", values="current_value", title="By Asset Type", hole=0.5)
-        _chart_theme(fig)
+    with ac2:
+        bv = enriched.groupby("asset_type", as_index=False)["current_value"].sum()
+        fig = _pie_chart(bv["asset_type"].tolist(), bv["current_value"].tolist(), "By Asset Type")
         st.plotly_chart(fig, use_container_width=True)
-
     history = load_price_history()
     if not history.empty:
-        value_history = history.merge(
-            holdings_df[["symbol", "asset_type", "quantity"]],
-            on=["symbol", "asset_type"],
-            how="left",
-        )
-        value_history["quantity"] = value_history["quantity"].fillna(0.0)
-        value_history["portfolio_value"] = value_history["price"] * value_history["quantity"]
-        merged = value_history.groupby("as_of_date", as_index=False)["portfolio_value"].sum()
-        fig = px.line(merged, x="as_of_date", y="portfolio_value", title="Portfolio Value",
-                      color_discrete_sequence=["#00c896"])
-        _chart_theme(fig)
+        vh = history.merge(holdings_df[["symbol","asset_type","quantity"]], on=["symbol","asset_type"], how="left")
+        vh["quantity"] = vh["quantity"].fillna(0.0); vh["portfolio_value"] = vh["price"] * vh["quantity"]
+        merged = vh.groupby("as_of_date", as_index=False)["portfolio_value"].sum()
+        fig = _line_chart(merged["as_of_date"].tolist(), merged["portfolio_value"].tolist(), title="Portfolio Value")
         st.plotly_chart(fig, use_container_width=True)
-
-    csv = enriched.to_csv(index=False).encode("utf-8")
-    st.download_button("Export Holdings CSV", data=csv, file_name="budget_black_book_holdings.csv", mime="text/csv")
+    st.download_button("Export Holdings CSV", data=enriched.to_csv(index=False).encode("utf-8"), file_name="holdings.csv", mime="text/csv")
 
 
-def render_reports(settings: dict[str, str], transactions_df: pd.DataFrame, holdings_df: pd.DataFrame, price_cache_df: pd.DataFrame) -> None:
-    st.title("Reports")
-
+def render_reports(settings, transactions_df, holdings_df, price_cache_df) -> None:
+    st.markdown('<div class="bb-title">Reports</div>', unsafe_allow_html=True)
+    st.markdown('<div class="bb-subtitle">Spending analysis</div>', unsafe_allow_html=True)
     if transactions_df.empty:
-        st.info("Log a few transactions and your reports will light up.")
-        return
-
-    tx = transactions_df.copy()
-    tx["date"] = pd.to_datetime(tx["date"])
-    min_date = tx["date"].min().date()
-    max_date = tx["date"].max().date()
+        st.info("Log transactions to see reports."); return
+    tx = transactions_df.copy(); tx["date"] = pd.to_datetime(tx["date"])
+    min_d, max_d = tx["date"].min().date(), tx["date"].max().date()
     c1, c2 = st.columns(2)
-    start_date = c1.date_input("Start Date", value=min_date, min_value=min_date, max_value=max_date)
-    end_date = c2.date_input("End Date", value=max_date, min_value=min_date, max_value=max_date)
+    start_date = c1.date_input("From", value=min_d, min_value=min_d, max_value=max_d)
+    end_date = c2.date_input("To", value=max_d, min_value=min_d, max_value=max_d)
     filtered = tx.loc[(tx["date"].dt.date >= start_date) & (tx["date"].dt.date <= end_date)].copy()
-
     expense_df = filtered.loc[filtered["type"] == "Expense"].copy()
     food_df = filtered.loc[filtered["category"] == "Food"].copy()
-
-    chart1, chart2 = st.columns(2)
-    with chart1:
+    ch1, ch2 = st.columns(2)
+    with ch1:
         if not expense_df.empty:
-            by_category = expense_df.groupby("category", as_index=False)["amount"].sum()
-            fig = px.pie(by_category, names="category", values="amount", title="Spending by Category", hole=0.5)
-            _chart_theme(fig)
+            bc = expense_df.groupby("category", as_index=False)["amount"].sum()
+            fig = _pie_chart(bc["category"].tolist(), bc["amount"].tolist(), "Spending by Category")
             st.plotly_chart(fig, use_container_width=True)
-
-    with chart2:
+    with ch2:
         if not food_df.empty:
-            food_trend = food_df.groupby(food_df["date"].dt.date, as_index=False)["amount"].sum()
-            fig = px.bar(food_trend, x="date", y="amount", title="Food Trend",
-                         color_discrete_sequence=["#00c896"])
-            fig.add_hline(
-                y=get_setting_float(settings, "daily_food_budget"),
-                line_dash="dash",
-                line_color="#f0a500",
-                annotation_text="daily cap",
-                annotation_font_color="#f0a500",
-                annotation_font_size=10,
-            )
-            _chart_theme(fig)
+            ft = food_df.groupby(food_df["date"].dt.date, as_index=False)["amount"].sum()
+            fig = _bar_chart(ft["date"].tolist(), ft["amount"].tolist(), color=C_GREEN,
+                             title="Food Trend", hline=get_setting_float(settings, "daily_food_budget"))
             st.plotly_chart(fig, use_container_width=True)
-
-    chart3, chart4 = st.columns(2)
-    with chart3:
+    ch3, ch4 = st.columns(2)
+    with ch3:
         if not expense_df.empty:
-            weekly_budget = get_setting_float(settings, "daily_food_budget") * 7
-            weekly_group = expense_df.loc[expense_df["category"] == "Food"].copy()
-            weekly_group["week"] = weekly_group["date"].dt.to_period("W").astype(str)
-            food_week = weekly_group.groupby("week", as_index=False)["amount"].sum()
-            if not food_week.empty:
+            wb = get_setting_float(settings, "daily_food_budget") * 7
+            wg = expense_df.loc[expense_df["category"] == "Food"].copy()
+            wg["week"] = wg["date"].dt.to_period("W").astype(str)
+            fw = wg.groupby("week", as_index=False)["amount"].sum()
+            if not fw.empty:
                 fig = go.Figure()
-                fig.add_bar(x=food_week["week"], y=food_week["amount"], name="Food Spend",
-                            marker_color="#00c896")
-                fig.add_scatter(x=food_week["week"], y=[weekly_budget] * len(food_week),
-                                name="Weekly Budget", mode="lines",
-                                line=dict(color="#f0a500", dash="dash", width=1))
-                fig.update_layout(title="Food vs Weekly Budget")
-                _chart_theme(fig)
-                st.plotly_chart(fig, use_container_width=True)
-
-    with chart4:
+                fig.add_bar(x=fw["week"].tolist(), y=fw["amount"].tolist(), name="Food", marker_color=C_GREEN, marker_opacity=0.85)
+                fig.add_scatter(x=fw["week"].tolist(), y=[wb]*len(fw), name="Budget", mode="lines",
+                                line=dict(color=C_GOLD, dash="dot", width=1))
+                _chart_theme(fig, "Food vs Weekly Budget"); st.plotly_chart(fig, use_container_width=True)
+    with ch4:
         if not holdings_df.empty:
             enriched = build_enriched_holdings(holdings_df, price_cache_df)
-            by_asset = enriched.groupby("asset_type", as_index=False)["current_value"].sum()
-            fig = px.bar(by_asset, x="asset_type", y="current_value", title="Portfolio by Asset",
-                         color_discrete_sequence=["#4da6ff"])
-            _chart_theme(fig)
+            ba = enriched.groupby("asset_type", as_index=False)["current_value"].sum()
+            fig = _bar_chart(ba["asset_type"].tolist(), ba["current_value"].tolist(), color=C_BLUE, title="Portfolio by Asset Type")
             st.plotly_chart(fig, use_container_width=True)
+    csv = filtered.copy(); csv["date"] = csv["date"].dt.strftime("%Y-%m-%d")
+    st.download_button("Export CSV", data=csv.to_csv(index=False).encode("utf-8"), file_name="transactions.csv", mime="text/csv")
 
-    csv = filtered.copy()
-    csv["date"] = csv["date"].dt.strftime("%Y-%m-%d")
-    st.download_button("Export Transactions CSV", data=csv.to_csv(index=False).encode("utf-8"), file_name="budget_black_book_transactions.csv", mime="text/csv")
-
-def add_account(name: str, account_type: str, is_debt: int, include_in_runway: int) -> None:
-    conn = get_connection()
-    try:
-        sort_order = db_execute(conn, "SELECT COUNT(*) AS count FROM accounts").fetchone()["count"] + 1
-        db_execute(
-            conn,
-            """
-            INSERT INTO accounts (name, account_type, is_debt, include_in_runway, starting_balance, sort_order)
-            VALUES (%s, %s, %s, %s, 0.0, %s)
-            ON CONFLICT(name) DO NOTHING
-            """,
-            (name, account_type, is_debt, include_in_runway, sort_order),
-        )
-        conn.commit()
-    finally:
-        conn.close()
 
 def render_settings(settings: dict[str, str], accounts_df: pd.DataFrame) -> None:
-    st.title("Settings")
+    st.markdown('<div class="bb-title">Settings</div>', unsafe_allow_html=True)
+    st.markdown('<div class="bb-subtitle">Configure your book</div>', unsafe_allow_html=True)
 
     with st.form("settings_form"):
         c1, c2, c3 = st.columns(3)
         daily_food_budget = c1.number_input("Daily Food Budget", min_value=0.0, value=get_setting_float(settings, "daily_food_budget"), step=1.0)
         pay_period_days = c2.number_input("Pay Period Days", min_value=1, value=int(get_setting_float(settings, "pay_period_days") or 14), step=1)
         statement_day = c3.number_input("Statement Day", min_value=1, max_value=31, value=int(get_setting_float(settings, "statement_day") or 2), step=1)
-
         c4, c5, c6, c7, c8 = st.columns(5)
         due_day = c4.number_input("Due Day", min_value=1, max_value=31, value=int(get_setting_float(settings, "due_day") or 27), step=1)
         savings_pct = c5.number_input("Savings %", min_value=0.0, max_value=1.0, value=get_setting_float(settings, "savings_pct"), step=0.01, format="%.2f")
         spending_pct = c6.number_input("Spending %", min_value=0.0, max_value=1.0, value=get_setting_float(settings, "spending_pct"), step=0.01, format="%.2f")
         crypto_pct = c7.number_input("Crypto %", min_value=0.0, max_value=1.0, value=get_setting_float(settings, "crypto_pct"), step=0.01, format="%.2f")
-        taxable_pct = c8.number_input("Taxable Stocks %", min_value=0.0, max_value=1.0, value=get_setting_float(settings, "taxable_investing_pct"), step=0.01, format="%.2f")
+        taxable_pct = c8.number_input("Taxable %", min_value=0.0, max_value=1.0, value=get_setting_float(settings, "taxable_investing_pct"), step=0.01, format="%.2f")
         roth_pct = st.number_input("Roth IRA %", min_value=0.0, max_value=1.0, value=get_setting_float(settings, "roth_ira_pct"), step=0.01, format="%.2f")
-
         if not math.isclose(savings_pct + spending_pct + crypto_pct + taxable_pct + roth_pct, 1.0, abs_tol=0.0001):
-            st.warning("Post-debt percentages should add up to 1.00 for a clean split.")
+            st.warning("Post-debt percentages should add to 1.00.")
 
         st.subheader("Account Starting Balances")
-        updated_balances = {}
+        updated_balances: dict[int, float] = {}
         cols = st.columns(2)
-
-        # Pull values out as plain Python lists to avoid Arrow type issues
-        acct_ids   = [int(x) for x in accounts_df["id"].tolist()]
-        acct_names = [str(x) for x in accounts_df["name"].tolist()]
+        # Extract as plain Python primitives — no Arrow types whatsoever
+        acct_ids   = [int(x)   for x in accounts_df["id"].tolist()]
+        acct_names = [str(x)   for x in accounts_df["name"].tolist()]
         acct_bals  = [float(x) for x in accounts_df["starting_balance"].tolist()]
-        acct_sorts = [int(x) for x in accounts_df["sort_order"].tolist()]
-
-        # Sort by sort_order
+        acct_sorts = [int(x)   for x in accounts_df["sort_order"].tolist()]
         combined = sorted(zip(acct_sorts, acct_ids, acct_names, acct_bals), key=lambda x: x[0])
-
         for idx, (_, acct_id, acct_name, acct_bal) in enumerate(combined):
-            updated_balances[acct_id] = cols[idx % 2].number_input(
-                acct_name,
-                value=acct_bal,
-                step=10.0,
-                format="%.2f",
-                key=f"bal_{idx}",
-            )
+            updated_balances[acct_id] = cols[idx % 2].number_input(acct_name, value=acct_bal, step=10.0, format="%.2f", key=f"bal_{idx}")
 
         submitted = st.form_submit_button("Save Settings", type="primary")
         if submitted:
             set_settings({
-                "daily_food_budget": daily_food_budget,
-                "pay_period_days": pay_period_days,
-                "statement_day": statement_day,
-                "due_day": due_day,
-                "savings_pct": savings_pct,
-                "spending_pct": spending_pct,
-                "crypto_pct": crypto_pct,
-                "taxable_investing_pct": taxable_pct,
-                "roth_ira_pct": roth_pct,
+                "daily_food_budget": daily_food_budget, "pay_period_days": pay_period_days,
+                "statement_day": statement_day, "due_day": due_day,
+                "savings_pct": savings_pct, "spending_pct": spending_pct,
+                "crypto_pct": crypto_pct, "taxable_investing_pct": taxable_pct, "roth_ira_pct": roth_pct,
             })
             conn = get_connection()
             try:
                 for acct_id, balance in updated_balances.items():
-                    db_execute(
-                        conn,
-                        "UPDATE accounts SET starting_balance = %s WHERE id = %s",
-                        (float(balance), int(acct_id)),
-                    )
+                    db_execute(conn, "UPDATE accounts SET starting_balance = %s WHERE id = %s", (float(balance), int(acct_id)))
                 conn.commit()
             finally:
                 conn.close()
-            st.success("Settings saved.")
-            st.rerun()
+            st.success("Settings saved."); st.rerun()
 
-    # ── Add New Account ───────────────────────────────────────────
     st.subheader("Add New Account")
     with st.form("add_account_form"):
         a1, a2 = st.columns(2)
         new_name = a1.text_input("Account Name", placeholder="e.g. Chase Checking")
         new_type = a2.selectbox("Account Type", ["cash", "savings", "credit", "investment"])
         a3, a4 = st.columns(2)
-        new_is_debt = 1 if a3.selectbox("Is this a debt account?", ["No", "Yes"]) == "Yes" else 0
-        new_runway = 1 if a4.selectbox("Include in runway calculation?", ["Yes", "No"]) == "Yes" else 0
-        add_submitted = st.form_submit_button("Add Account", type="primary")
-        if add_submitted:
-            if not new_name.strip():
-                st.error("Account name is required.")
+        new_is_debt = 1 if a3.selectbox("Is this a debt?", ["No", "Yes"]) == "Yes" else 0
+        new_runway = 1 if a4.selectbox("Include in runway?", ["Yes", "No"]) == "Yes" else 0
+        if st.form_submit_button("Add Account", type="primary"):
+            if not new_name.strip(): st.error("Account name required.")
             else:
                 add_account(new_name.strip(), new_type, new_is_debt, new_runway)
-                st.success(f"Account '{new_name}' added.")
-                st.rerun()
+                st.success(f"'{new_name}' added."); st.rerun()
 
-    # ── Export ────────────────────────────────────────────────────
-    st.subheader("Export")
-    tx_df = load_transactions()
-    hld_df = load_holdings()
-    st.download_button(
-        "Export Transactions CSV",
-        data=tx_df.to_csv(index=False).encode("utf-8"),
-        file_name="budget_black_book_transactions.csv",
-        mime="text/csv",
-    )
-    st.download_button(
-        "Export Holdings CSV",
-        data=hld_df.to_csv(index=False).encode("utf-8"),
-        file_name="budget_black_book_holdings.csv",
-        mime="text/csv",
-    )
+    st.subheader("Export Data")
+    tx_df = load_transactions(); hld_df = load_holdings()
+    c1, c2 = st.columns(2)
+    c1.download_button("Transactions CSV", data=tx_df.to_csv(index=False).encode("utf-8"), file_name="transactions.csv", mime="text/csv")
+    c2.download_button("Holdings CSV", data=hld_df.to_csv(index=False).encode("utf-8"), file_name="holdings.csv", mime="text/csv")
 
+
+# ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
     inject_css()
@@ -1923,16 +1247,12 @@ def main() -> None:
     price_cache_df = load_price_cache()
     balances_df = build_account_balances(accounts_df, transactions_df, holdings_df, price_cache_df)
 
-    page = st.sidebar.radio(
-        "Navigate",
-        ["Dashboard", "Log Transaction", "Paycheck Allocation", "Investments", "Reports", "Settings"],
-    )
-    st.sidebar.markdown("---")
-    st.sidebar.caption("📊 Budget Black Book")
-    if IS_POSTGRES:
-        st.sidebar.caption("DB: PostgreSQL (cloud)")
-    else:
-        st.sidebar.caption(f"DB: `{DB_PATH}`")
+    with st.sidebar:
+        st.markdown('<div class="bb-sidebar-brand">Black Book</div>', unsafe_allow_html=True)
+        st.markdown("---")
+        page = st.radio("", ["Dashboard", "Log Transaction", "Paycheck Allocation", "Investments", "Reports", "Settings"], label_visibility="collapsed")
+        st.markdown("---")
+        st.caption("PostgreSQL · Cloud" if IS_POSTGRES else f"SQLite · {DB_PATH}")
 
     if page == "Dashboard":
         render_dashboard(settings, transactions_df, holdings_df, balances_df, price_cache_df)
