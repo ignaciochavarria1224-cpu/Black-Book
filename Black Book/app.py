@@ -1034,7 +1034,7 @@ def build_account_balances(accounts_df: pd.DataFrame, transactions_df: pd.DataFr
     balances["current_balance"] = _to_float_series(balances["starting_balance"])
 
     if transactions_df.empty:
-        tx_df = pd.DataFrame(columns=["account_id", "to_account_id", "type", "amount"])
+        tx_df = pd.DataFrame(columns=["account_id", "to_account_id", "type", "amount", "date", "id"])
     else:
         tx_df = transactions_df.copy()
         tx_df["amount"] = _to_float_series(tx_df["amount"])
