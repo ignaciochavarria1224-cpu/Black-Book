@@ -483,20 +483,13 @@ def set_settings(settings: dict[str, Any]) -> None:
 def load_accounts() -> pd.DataFrame:
     conn = get_connection()
     try:
-        df = pd.read_sql_query(
-            """
-            SELECT id, name, account_type, is_debt, include_in_runway, starting_balance, sort_order
-            FROM accounts
-            ORDER BY sort_order, name
-            """,
-            conn,
-        )
+        df = pd.read_sql_query(...)
     finally:
         conn.close()
-    # Coerce numeric columns — Postgres + newer pandas can return Arrow-backed types
     for col in ("id", "is_debt", "include_in_runway", "sort_order"):
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
     df["starting_balance"] = _to_float_series(df["starting_balance"])
+    df = pd.DataFrame(df.to_dict("records"))  # ← ADD THIS LINE
     return df
 
 
