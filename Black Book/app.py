@@ -280,17 +280,20 @@ def inject_css() -> None:
     )
 
 def get_connection():
-    # Try Streamlit secrets first, fall back to env variable
     DATABASE_URL = st.secrets.get("DATABASE_URL") or os.environ.get("DATABASE_URL")
     
     if not DATABASE_URL:
         st.error("DATABASE_URL is not configured.")
         st.stop()
-    
+
+    # Embed sslmode in the URL — don't pass it as a separate kwarg
+    if "sslmode" not in DATABASE_URL:
+        DATABASE_URL += "?sslmode=require"
+
     conn = psycopg2.connect(
         DATABASE_URL,
-        cursor_factory=psycopg2.extras.RealDictCursor,
-        sslmode="require"
+        cursor_factory=psycopg2.extras.RealDictCursor
+        # ← removed sslmode="require" from here
     )
     return conn
     
