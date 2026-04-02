@@ -1,5 +1,7 @@
 """
 Budget Black Book — Cloud Edition
+Features: Transactions (log/delete), Investments (add/edit/delete), Smart Allocation,
+          Daily Reports, Capital One Reconciliation, Journal, Agenda (Google Calendar)
 """
 
 from __future__ import annotations
@@ -8,14 +10,12 @@ import json
 import math
 import os
 import re
-import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import requests
 import streamlit as st
@@ -28,6 +28,12 @@ try:
 except ImportError:
     _PSYCOPG2_AVAILABLE = False
 
+try:
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build as google_build
+    _GOOGLE_AVAILABLE = True
+except ImportError:
+    _GOOGLE_AVAILABLE = False
 
 APP_TITLE = "Budget Black Book"
 DB_PATH = Path(os.getenv("BUDGET_BLACK_BOOK_DB_PATH", "budget_black_book.db"))
@@ -48,7 +54,8 @@ DEFAULT_SETTINGS = {
     "daily_food_budget": "30", "pay_period_days": "14", "statement_day": "2",
     "due_day": "27", "savings_pct": "0.30", "spending_pct": "0.40",
     "crypto_pct": "0.10", "taxable_investing_pct": "0.10", "roth_ira_pct": "0.10",
-    "debt_allocation_mode": "proportional", "migration_completed": "0", "last_price_refresh_at": "",
+    "debt_allocation_mode": "proportional", "migration_completed": "0",
+    "last_price_refresh_at": "", "next_payday": "",
 }
 DEFAULT_ACCOUNTS = [
     {"name": "Checking",    "account_type": "cash",       "is_debt": 0, "include_in_runway": 1, "sort_order": 1},
@@ -64,6 +71,7 @@ COMMON_CATEGORIES = [
     "Gas", "Health", "Shopping", "Entertainment", "Savings",
     "Transfer", "Investing", "Other",
 ]
+JOURNAL_TAGS = ["General", "Finance", "Reflection", "Decision", "Goals", "Other"]
 CRYPTO_NAME_TO_ID = {
     "XRP": "ripple", "Bitcoin (BTC)": "bitcoin", "Bittensor (TAO)": "bittensor",
     "Worldcoin (WLD)": "worldcoin-wld", "Sui (SUI)": "sui",
@@ -74,7 +82,6 @@ STOCK_NAME_TO_TICKER = {
     "Invesco QQQ (QQQ)": "QQQ", "SPDR S&P 500 (SPY)": "SPY",
 }
 
-# Colour palette
 C_GREEN  = "#00c896"
 C_GOLD   = "#f0a500"
 C_RED    = "#ff4d4d"
@@ -100,109 +107,52 @@ def inject_css() -> None:
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=JetBrains+Mono:wght@400;600&display=swap');
-
     .main > div { padding-top: 0.5rem; }
-
-    section[data-testid="stSidebar"] {
-        background: #060810;
-        border-right: 1px solid rgba(255,255,255,0.04);
-    }
-
-    /* Title */
-    .bb-title {
-        font-family: 'Playfair Display', serif;
-        font-size: 2.4rem;
-        font-weight: 900;
-        letter-spacing: 0.05em;
-        color: #f0f0f0;
-        line-height: 1;
-        margin-bottom: 0;
-    }
-    .bb-subtitle {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.62rem;
-        letter-spacing: 0.25em;
-        color: #374151;
-        text-transform: uppercase;
-        margin-bottom: 1.2rem;
-        border-bottom: 1px solid rgba(255,255,255,0.04);
-        padding-bottom: 0.8rem;
-    }
-
-    /* Section headers */
-    h2, h3 {
-        font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.65rem !important;
-        font-weight: 600 !important;
-        letter-spacing: 0.18em !important;
-        text-transform: uppercase !important;
-        color: #374151 !important;
-        margin-top: 1.5rem !important;
-        margin-bottom: 0.5rem !important;
-    }
-
-    /* Metrics */
-    [data-testid="stMetric"] {
-        background: #0d1117;
-        border: 1px solid rgba(255,255,255,0.05);
-        border-radius: 2px;
-        padding: 0.9rem 1rem 0.7rem 1rem;
-        position: relative;
-    }
-    [data-testid="stMetric"]::before {
-        content: '';
-        position: absolute;
-        top: 0; left: 0; right: 0;
-        height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(0,200,150,0.3), transparent);
-    }
-    [data-testid="stMetricLabel"] p {
-        font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.6rem !important;
-        text-transform: uppercase;
-        letter-spacing: 0.15em;
-        color: #374151 !important;
-    }
-    [data-testid="stMetricValue"] {
-        font-family: 'JetBrains Mono', monospace !important;
-        font-size: 1.2rem !important;
-        color: #e2e8f0 !important;
-    }
-    [data-testid="stMetricDelta"] {
-        font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.72rem !important;
-    }
-
-    /* Dataframes */
-    [data-testid="stDataFrame"] {
-        border: 1px solid rgba(255,255,255,0.05) !important;
-        border-radius: 2px !important;
-    }
-
-    /* Buttons */
-    [data-testid="baseButton-primary"] {
-        border-radius: 2px !important;
-        letter-spacing: 0.1em;
-        font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.72rem !important;
-        text-transform: uppercase;
-    }
-
-    /* Sidebar */
-    [data-testid="stRadio"] label {
-        font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.72rem !important;
-        letter-spacing: 0.08em;
-    }
-
-    /* Sidebar caption */
-    .bb-sidebar-brand {
-        font-family: 'Playfair Display', serif;
-        font-size: 1rem;
-        font-weight: 700;
-        color: #374151;
-        letter-spacing: 0.05em;
-    }
+    section[data-testid="stSidebar"] { background: #060810; border-right: 1px solid rgba(255,255,255,0.04); }
+    .bb-title { font-family: 'Playfair Display', serif; font-size: 2.4rem; font-weight: 900;
+                letter-spacing: 0.05em; color: #f0f0f0; line-height: 1; margin-bottom: 0; }
+    .bb-subtitle { font-family: 'JetBrains Mono', monospace; font-size: 0.62rem; letter-spacing: 0.25em;
+                   color: #374151; text-transform: uppercase; margin-bottom: 1.2rem;
+                   border-bottom: 1px solid rgba(255,255,255,0.04); padding-bottom: 0.8rem; }
+    h2, h3 { font-family: 'JetBrains Mono', monospace !important; font-size: 0.65rem !important;
+             font-weight: 600 !important; letter-spacing: 0.18em !important; text-transform: uppercase !important;
+             color: #374151 !important; margin-top: 1.5rem !important; margin-bottom: 0.5rem !important; }
+    [data-testid="stMetric"] { background: #0d1117; border: 1px solid rgba(255,255,255,0.05);
+                                border-radius: 2px; padding: 0.9rem 1rem 0.7rem 1rem; position: relative; }
+    [data-testid="stMetric"]::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+                                        background: linear-gradient(90deg, transparent, rgba(0,200,150,0.3), transparent); }
+    [data-testid="stMetricLabel"] p { font-family: 'JetBrains Mono', monospace !important; font-size: 0.6rem !important;
+                                       text-transform: uppercase; letter-spacing: 0.15em; color: #374151 !important; }
+    [data-testid="stMetricValue"] { font-family: 'JetBrains Mono', monospace !important;
+                                     font-size: 1.2rem !important; color: #e2e8f0 !important; }
+    [data-testid="stMetricDelta"] { font-family: 'JetBrains Mono', monospace !important; font-size: 0.72rem !important; }
+    [data-testid="stDataFrame"] { border: 1px solid rgba(255,255,255,0.05) !important; border-radius: 2px !important; }
+    [data-testid="baseButton-primary"] { border-radius: 2px !important; letter-spacing: 0.1em;
+                                          font-family: 'JetBrains Mono', monospace !important;
+                                          font-size: 0.72rem !important; text-transform: uppercase; }
+    [data-testid="stRadio"] label { font-family: 'JetBrains Mono', monospace !important;
+                                     font-size: 0.72rem !important; letter-spacing: 0.08em; }
+    .bb-sidebar-brand { font-family: 'Playfair Display', serif; font-size: 1rem;
+                         font-weight: 700; color: #374151; letter-spacing: 0.05em; }
+    .bb-report-card { background: #0d1117; border: 1px solid rgba(255,255,255,0.05);
+                       border-radius: 2px; padding: 1rem; margin-bottom: 0.75rem; }
+    .bb-report-date { font-family: 'Playfair Display', serif; font-size: 1rem;
+                       color: #e2e8f0; margin-bottom: 0.5rem; }
+    .bb-report-row { display: flex; justify-content: space-between;
+                      font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;
+                      color: #6b7280; padding: 0.15rem 0; border-bottom: 1px solid rgba(255,255,255,0.02); }
+    .bb-report-val { color: #e2e8f0; }
+    .bb-journal-entry { background: #0d1117; border: 1px solid rgba(255,255,255,0.05);
+                         border-radius: 2px; padding: 1rem; margin-bottom: 0.75rem; }
+    .bb-journal-header { display: flex; justify-content: space-between; margin-bottom: 0.5rem; }
+    .bb-journal-date { font-family: 'JetBrains Mono', monospace; font-size: 0.65rem;
+                        letter-spacing: 0.1em; color: #374151; }
+    .bb-journal-tag { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem;
+                       letter-spacing: 0.1em; color: #00c896; text-transform: uppercase; }
+    .bb-journal-body { font-size: 0.85rem; color: #9ca3af; line-height: 1.6; white-space: pre-wrap; }
+    .recon-match { color: #00c896; }
+    .recon-miss  { color: #ff4d4d; }
+    .recon-disc  { color: #f0a500; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -232,14 +182,6 @@ def _to_float_series(s: pd.Series) -> pd.Series:
 
 
 def _cursor_to_df(cur) -> pd.DataFrame:
-    """
-    THE definitive fix for RealDictCursor + pandas.
-
-    pd.read_sql_query with psycopg2 RealDictCursor iterates over dict KEYS
-    instead of values, producing DataFrames where every cell contains the
-    column name as a string. We bypass this by fetching rows ourselves and
-    converting each RealDictRow to a plain Python dict before building the DF.
-    """
     rows = cur.fetchall()
     if not rows:
         cols = [desc[0] for desc in cur.description] if cur.description else []
@@ -257,9 +199,11 @@ def init_db() -> None:
         "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
         f"CREATE TABLE IF NOT EXISTS transactions (id {serial} PRIMARY KEY {ai}, date TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, amount REAL NOT NULL, account_id INTEGER NOT NULL, type TEXT NOT NULL, to_account_id INTEGER, notes TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(account_id) REFERENCES accounts(id), FOREIGN KEY(to_account_id) REFERENCES accounts(id))",
         f"CREATE TABLE IF NOT EXISTS holdings (id {serial} PRIMARY KEY {ai}, symbol TEXT NOT NULL, display_name TEXT NOT NULL, asset_type TEXT NOT NULL, account_id INTEGER NOT NULL, amount_invested REAL NOT NULL DEFAULT 0, quantity REAL NOT NULL DEFAULT 0, avg_price REAL NOT NULL DEFAULT 0, coingecko_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(account_id) REFERENCES accounts(id))",
-        f"CREATE TABLE IF NOT EXISTS allocation_snapshots (id {serial} PRIMARY KEY {ai}, paycheck_amount REAL NOT NULL, run_date TEXT NOT NULL, debt_total REAL NOT NULL, food_reserved REAL NOT NULL, debt_reserved REAL NOT NULL, savings_reserved REAL NOT NULL, spending_reserved REAL NOT NULL, crypto_reserved REAL NOT NULL, taxable_reserved REAL NOT NULL, roth_reserved REAL NOT NULL, debt_breakdown_json TEXT NOT NULL, meta_json TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        f"CREATE TABLE IF NOT EXISTS allocation_snapshots (id {serial} PRIMARY KEY {ai}, paycheck_amount REAL NOT NULL, run_date TEXT NOT NULL, debt_total REAL NOT NULL, food_reserved REAL NOT NULL, debt_reserved REAL NOT NULL, savings_reserved REAL NOT NULL, surplus_savings REAL NOT NULL DEFAULT 0, spending_reserved REAL NOT NULL, crypto_reserved REAL NOT NULL, taxable_reserved REAL NOT NULL, roth_reserved REAL NOT NULL, debt_breakdown_json TEXT NOT NULL, meta_json TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
         "CREATE TABLE IF NOT EXISTS price_cache (symbol TEXT NOT NULL, asset_type TEXT NOT NULL, price REAL NOT NULL, previous_close REAL, currency TEXT NOT NULL DEFAULT 'USD', source TEXT NOT NULL, as_of_date TEXT NOT NULL, fetched_at TEXT NOT NULL, PRIMARY KEY(symbol, asset_type))",
         f"CREATE TABLE IF NOT EXISTS price_history (id {serial} PRIMARY KEY {ai}, symbol TEXT NOT NULL, asset_type TEXT NOT NULL, price REAL NOT NULL, previous_close REAL, as_of_date TEXT NOT NULL, source TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        f"CREATE TABLE IF NOT EXISTS daily_reports (id {serial} PRIMARY KEY {ai}, report_date TEXT NOT NULL UNIQUE, snapshot_json TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        f"CREATE TABLE IF NOT EXISTS journal_entries (id {serial} PRIMARY KEY {ai}, entry_date TEXT NOT NULL, tag TEXT NOT NULL DEFAULT 'General', body TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     ]
     conn = get_connection()
     try:
@@ -275,7 +219,7 @@ def init_db() -> None:
         conn.close()
 
 
-# ── Data access (all use _cursor_to_df — no pd.read_sql_query) ───────────────
+# ── Data access ───────────────────────────────────────────────────────────────
 
 def table_exists_with_rows(table_name: str) -> bool:
     conn = get_connection()
@@ -308,8 +252,7 @@ def set_settings(settings: dict[str, Any]) -> None:
 def load_accounts() -> pd.DataFrame:
     conn = get_connection()
     try:
-        cur = db_execute(conn, "SELECT id, name, account_type, is_debt, include_in_runway, starting_balance, sort_order FROM accounts ORDER BY sort_order, name")
-        df = _cursor_to_df(cur)
+        df = _cursor_to_df(db_execute(conn, "SELECT id, name, account_type, is_debt, include_in_runway, starting_balance, sort_order FROM accounts ORDER BY sort_order, name"))
     finally:
         conn.close()
     if df.empty:
@@ -334,13 +277,24 @@ def add_account(name: str, account_type: str, is_debt: int, include_in_runway: i
         conn.close()
 
 
+# ── Transactions ──────────────────────────────────────────────────────────────
+
 def add_transaction(tx_date: date, description: str, category: str, amount: float,
                     account_id: int, tx_type: str, to_account_id: int | None, notes: str) -> None:
     conn = get_connection()
     try:
         db_execute(conn, "INSERT INTO transactions (date, description, category, amount, account_id, type, to_account_id, notes) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                   (tx_date.strftime(DATE_FMT), description.strip(), category, float(amount), int(account_id), tx_type,
-                    int(to_account_id) if to_account_id else None, notes.strip() or None))
+                   (tx_date.strftime(DATE_FMT), description.strip(), category, float(amount),
+                    int(account_id), tx_type, int(to_account_id) if to_account_id else None, notes.strip() or None))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_transaction(tx_id: int) -> None:
+    conn = get_connection()
+    try:
+        db_execute(conn, "DELETE FROM transactions WHERE id = %s", (int(tx_id),))
         conn.commit()
     finally:
         conn.close()
@@ -349,15 +303,14 @@ def add_transaction(tx_date: date, description: str, category: str, amount: floa
 def load_transactions() -> pd.DataFrame:
     conn = get_connection()
     try:
-        cur = db_execute(conn, """
+        df = _cursor_to_df(db_execute(conn, """
             SELECT t.id, t.date, t.description, t.category, t.amount, t.type, t.notes,
                    a.name AS account, a.id AS account_id,
                    ta.name AS to_account, ta.id AS to_account_id
             FROM transactions t
             JOIN accounts a ON a.id = t.account_id
             LEFT JOIN accounts ta ON ta.id = t.to_account_id
-            ORDER BY t.date DESC, t.id DESC""")
-        df = _cursor_to_df(cur)
+            ORDER BY t.date DESC, t.id DESC"""))
     finally:
         conn.close()
     if df.empty:
@@ -371,16 +324,48 @@ def load_transactions() -> pd.DataFrame:
     return df
 
 
+# ── Holdings ──────────────────────────────────────────────────────────────────
+
+def add_holding(symbol: str, display_name: str, asset_type: str, account_id: int,
+                amount_invested: float, quantity: float, avg_price: float, coingecko_id: str) -> None:
+    conn = get_connection()
+    try:
+        db_execute(conn, "INSERT INTO holdings (symbol, display_name, asset_type, account_id, amount_invested, quantity, avg_price, coingecko_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                   (symbol.upper().strip(), display_name.strip(), asset_type, int(account_id),
+                    float(amount_invested), float(quantity), float(avg_price), coingecko_id.strip() or None))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_holding(holding_id: int, amount_invested: float, quantity: float, avg_price: float) -> None:
+    conn = get_connection()
+    try:
+        db_execute(conn, "UPDATE holdings SET amount_invested=%s, quantity=%s, avg_price=%s, updated_at=CURRENT_TIMESTAMP WHERE id=%s",
+                   (float(amount_invested), float(quantity), float(avg_price), int(holding_id)))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_holding(holding_id: int) -> None:
+    conn = get_connection()
+    try:
+        db_execute(conn, "DELETE FROM holdings WHERE id = %s", (int(holding_id),))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def load_holdings() -> pd.DataFrame:
     conn = get_connection()
     try:
-        cur = db_execute(conn, """
+        df = _cursor_to_df(db_execute(conn, """
             SELECT h.id, h.symbol, h.display_name, h.asset_type,
                    h.amount_invested, h.quantity, h.avg_price, h.coingecko_id,
                    a.name AS account, a.id AS account_id
             FROM holdings h JOIN accounts a ON a.id = h.account_id
-            ORDER BY a.sort_order, h.display_name""")
-        df = _cursor_to_df(cur)
+            ORDER BY a.sort_order, h.display_name"""))
     finally:
         conn.close()
     if df.empty:
@@ -393,17 +378,20 @@ def load_holdings() -> pd.DataFrame:
     return df
 
 
+# ── Allocation snapshots ──────────────────────────────────────────────────────
+
 def save_allocation_snapshot(payload: dict[str, Any]) -> None:
     conn = get_connection()
     try:
         db_execute(conn, """INSERT INTO allocation_snapshots
             (paycheck_amount, run_date, debt_total, food_reserved, debt_reserved,
-             savings_reserved, spending_reserved, crypto_reserved, taxable_reserved,
-             roth_reserved, debt_breakdown_json, meta_json)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+             savings_reserved, surplus_savings, spending_reserved, crypto_reserved,
+             taxable_reserved, roth_reserved, debt_breakdown_json, meta_json)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                    (payload["paycheck_amount"], payload["run_date"], payload["debt_total"],
                     payload["food_reserved"], payload["debt_reserved"], payload["savings_reserved"],
-                    payload["spending_reserved"], payload["crypto_reserved"], payload["taxable_reserved"],
+                    payload.get("surplus_savings", 0.0), payload["spending_reserved"],
+                    payload["crypto_reserved"], payload["taxable_reserved"],
                     payload["roth_reserved"], json.dumps(payload["debt_breakdown"]), json.dumps(payload["meta"])))
         conn.commit()
     finally:
@@ -415,18 +403,19 @@ def load_allocation_snapshots(limit: int = 10) -> pd.DataFrame:
     try:
         sql = "SELECT * FROM allocation_snapshots ORDER BY run_date DESC, id DESC LIMIT %s" if IS_POSTGRES \
               else "SELECT * FROM allocation_snapshots ORDER BY date(run_date) DESC, id DESC LIMIT ?"
-        cur = db_execute(conn, sql, (limit,))
-        df = _cursor_to_df(cur)
+        df = _cursor_to_df(db_execute(conn, sql, (limit,)))
     finally:
         conn.close()
     if df.empty:
         return df
-    for col in ("paycheck_amount", "debt_total", "food_reserved", "debt_reserved",
-                "savings_reserved", "spending_reserved", "crypto_reserved", "taxable_reserved", "roth_reserved"):
+    for col in ("paycheck_amount", "debt_total", "food_reserved", "debt_reserved", "savings_reserved",
+                "surplus_savings", "spending_reserved", "crypto_reserved", "taxable_reserved", "roth_reserved"):
         if col in df.columns:
             df[col] = _to_float_series(df[col])
     return df
 
+
+# ── Price data ────────────────────────────────────────────────────────────────
 
 def upsert_price(symbol: str, asset_type: str, price: float, previous_close: float | None, source: str, as_of_date: str) -> None:
     fetched_at = datetime.now().isoformat(timespec="seconds")
@@ -473,6 +462,118 @@ def load_price_history() -> pd.DataFrame:
     return df
 
 
+# ── Daily reports ─────────────────────────────────────────────────────────────
+
+def save_daily_report(report_date: str, snapshot: dict[str, Any]) -> None:
+    conn = get_connection()
+    try:
+        db_execute(conn, "INSERT INTO daily_reports (report_date, snapshot_json) VALUES (%s, %s) ON CONFLICT(report_date) DO NOTHING",
+                   (report_date, json.dumps(snapshot)))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_daily_reports(limit: int = 30) -> list[dict[str, Any]]:
+    conn = get_connection()
+    try:
+        sql = "SELECT report_date, snapshot_json FROM daily_reports ORDER BY report_date DESC LIMIT %s" if IS_POSTGRES \
+              else "SELECT report_date, snapshot_json FROM daily_reports ORDER BY report_date DESC LIMIT ?"
+        rows = db_execute(conn, sql, (limit,)).fetchall()
+    finally:
+        conn.close()
+    result = []
+    for r in rows:
+        try:
+            snap = json.loads(r["snapshot_json"])
+            snap["report_date"] = r["report_date"]
+            result.append(snap)
+        except Exception:
+            pass
+    return result
+
+
+def report_exists(report_date: str) -> bool:
+    conn = get_connection()
+    try:
+        row = db_execute(conn, "SELECT COUNT(*) AS count FROM daily_reports WHERE report_date = %s", (report_date,)).fetchone()
+    finally:
+        conn.close()
+    return bool(int(row["count"]))
+
+
+def maybe_generate_yesterday_report(accounts_df, transactions_df, holdings_df, price_cache_df, settings) -> None:
+    """Generate yesterday's report if it doesn't exist yet."""
+    yesterday = (date.today() - timedelta(days=1)).strftime(DATE_FMT)
+    if report_exists(yesterday):
+        return
+    try:
+        # Filter to yesterday and before
+        if not transactions_df.empty:
+            tx_yesterday = transactions_df[pd.to_datetime(transactions_df["date"]).dt.date <= date.today() - timedelta(days=1)].copy()
+        else:
+            tx_yesterday = transactions_df
+        balances = build_account_balances(accounts_df, tx_yesterday, holdings_df, price_cache_df)
+        food = build_food_metrics(tx_yesterday, settings)
+        runway = build_runway(tx_yesterday, balances, food)
+        debt = build_debt_summary(balances)
+        nw = build_net_worth(balances)
+        enriched_h = build_enriched_holdings(holdings_df, price_cache_df) if not holdings_df.empty else pd.DataFrame()
+        snapshot = {
+            "net_worth": nw["net_worth"],
+            "assets": nw["assets"],
+            "debt": debt["total_debt"],
+            "runway_days": round(runway["runway_days"], 1),
+            "liquid_cash": nw["assets"],
+            "food_spent": food["food_spent_today"],
+            "food_surplus": food["current_carry_surplus"],
+            "portfolio_value": float(enriched_h["current_value"].sum()) if not enriched_h.empty else 0.0,
+            "portfolio_pnl": float(enriched_h["total_pnl"].sum()) if not enriched_h.empty else 0.0,
+            "txn_count": len(tx_yesterday[pd.to_datetime(tx_yesterday["date"]).dt.date == date.today() - timedelta(days=1)]) if not tx_yesterday.empty else 0,
+            "accounts": {str(r["name"]): round(float(r["display_balance"]), 2) for _, r in balances.iterrows()},
+        }
+        save_daily_report(yesterday, snapshot)
+    except Exception:
+        pass  # Never crash the app over report generation
+
+
+# ── Journal ───────────────────────────────────────────────────────────────────
+
+def save_journal_entry(entry_date: date, tag: str, body: str) -> None:
+    conn = get_connection()
+    try:
+        db_execute(conn, "INSERT INTO journal_entries (entry_date, tag, body) VALUES (%s, %s, %s)",
+                   (entry_date.strftime(DATE_FMT), tag, body.strip()))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_journal_entries(limit: int = 50, tag_filter: str = "All") -> pd.DataFrame:
+    conn = get_connection()
+    try:
+        if tag_filter == "All":
+            sql = "SELECT id, entry_date, tag, body FROM journal_entries ORDER BY entry_date DESC, id DESC LIMIT %s" if IS_POSTGRES \
+                  else "SELECT id, entry_date, tag, body FROM journal_entries ORDER BY entry_date DESC, id DESC LIMIT ?"
+            df = _cursor_to_df(db_execute(conn, sql, (limit,)))
+        else:
+            sql = "SELECT id, entry_date, tag, body FROM journal_entries WHERE tag = %s ORDER BY entry_date DESC, id DESC LIMIT %s" if IS_POSTGRES \
+                  else "SELECT id, entry_date, tag, body FROM journal_entries WHERE tag = ? ORDER BY entry_date DESC, id DESC LIMIT ?"
+            df = _cursor_to_df(db_execute(conn, sql, (tag_filter, limit)))
+    finally:
+        conn.close()
+    return df
+
+
+def delete_journal_entry(entry_id: int) -> None:
+    conn = get_connection()
+    try:
+        db_execute(conn, "DELETE FROM journal_entries WHERE id = %s", (int(entry_id),))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 # ── Excel migration ───────────────────────────────────────────────────────────
 
 def excel_serial_to_date(value: Any) -> date | None:
@@ -486,30 +587,16 @@ def excel_serial_to_date(value: Any) -> date | None:
 
 def detect_workbook() -> Path | None:
     for c in [Path.cwd() / "Budget Black Book copy.xlsx", Path.cwd() / "Budget Black Book.xlsx",
-               Path.home() / "Downloads" / "Budget Black Book copy.xlsx", Path.home() / "Downloads" / "Budget Black Book.xlsx"]:
+              Path.home() / "Downloads" / "Budget Black Book copy.xlsx",
+              Path.home() / "Downloads" / "Budget Black Book.xlsx"]:
         if c.exists(): return c
     return None
 
 
 def normalize_account_name(name: Any) -> str:
     value = str(name or "").strip()
-    return {"Savor (CC)": "Savor", "Venture (CC)": "Venture", "Roth IRA (Fidelity)": "Roth IRA", "Investments (Fidelity)": "Investments"}.get(value, value)
-
-
-def parse_home_settings(home_df: pd.DataFrame) -> tuple[dict[str, float], dict[str, str]]:
-    su: dict[str, str] = {}; ab: dict[str, float] = {}
-    lu = {"Daily Budget": ("daily_food_budget", "numeric"), "Checking — Starting Balance": ("Checking", "account"),
-          "Savings — Starting Balance": ("Savings", "account"), "Savor (CC) — Starting Balance": ("Savor", "account"),
-          "Venture (CC) — Starting Balance": ("Venture", "account"), "Coinbase — Starting Balance": ("Coinbase", "account"),
-          "Roth IRA (Fidelity) — Starting Balance": ("Roth IRA", "account"), "Investments (Fidelity) — Starting Balance": ("Investments", "account")}
-    for _, row in home_df.iterrows():
-        label = str(row.iloc[2]).strip() if len(row) > 2 and pd.notna(row.iloc[2]) else ""
-        value = row.iloc[4] if len(row) > 4 else None
-        if label in lu and pd.notna(value):
-            target, kind = lu[label]
-            if kind == "numeric": su[target] = str(float(value))
-            else: ab[target] = float(value)
-    return ab, su
+    return {"Savor (CC)": "Savor", "Venture (CC)": "Venture",
+            "Roth IRA (Fidelity)": "Roth IRA", "Investments (Fidelity)": "Investments"}.get(value, value)
 
 
 def ensure_account(conn, name: str) -> int:
@@ -537,36 +624,38 @@ def migrate_from_excel_if_needed() -> str | None:
         return f"Import failed: {exc}"
     conn = get_connection()
     try:
-        ab, su = parse_home_settings(home_df)
+        lu = {"Daily Budget": ("daily_food_budget", "numeric"),
+              "Checking — Starting Balance": ("Checking", "account"),
+              "Savings — Starting Balance": ("Savings", "account")}
+        su: dict[str, str] = {}; ab: dict[str, float] = {}
+        for _, row in home_df.iterrows():
+            label = str(row.iloc[2]).strip() if len(row) > 2 and pd.notna(row.iloc[2]) else ""
+            value = row.iloc[4] if len(row) > 4 else None
+            if label in lu and pd.notna(value):
+                target, kind = lu[label]
+                if kind == "numeric": su[target] = str(float(value))
+                else: ab[target] = float(value)
         for name, balance in ab.items():
-            db_execute(conn, "UPDATE accounts SET starting_balance = %s WHERE id = %s", (float(balance), ensure_account(conn, name)))
+            db_execute(conn, "UPDATE accounts SET starting_balance = %s WHERE id = %s",
+                       (float(balance), ensure_account(conn, name)))
         for k, v in su.items():
             db_execute(conn, "INSERT INTO settings (key, value) VALUES (%s,%s) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, v))
         if not table_exists_with_rows("transactions"):
             spending_df.columns = [str(c).strip() for c in spending_df.columns]
             spending_df = spending_df.dropna(how="all")
             for _, row in spending_df.iterrows():
-                tx_date = excel_serial_to_date(row.get("Date")); desc = str(row.get("Description") or "").strip()
-                cat = str(row.get("Category") or "Other").strip(); amount = row.get("Amount")
-                acct = normalize_account_name(row.get("Account")); ttype = str(row.get("Type") or "Expense").strip()
+                tx_date = excel_serial_to_date(row.get("Date"))
+                desc = str(row.get("Description") or "").strip()
+                cat = str(row.get("Category") or "Other").strip()
+                amount = row.get("Amount")
+                acct = normalize_account_name(row.get("Account"))
+                ttype = str(row.get("Type") or "Expense").strip()
                 to_acct = normalize_account_name(row.get("To Account"))
                 if not tx_date or not desc or pd.isna(amount) or not acct: continue
-                aid = ensure_account(conn, acct); taid = ensure_account(conn, to_acct) if to_acct else None
+                aid = ensure_account(conn, acct)
+                taid = ensure_account(conn, to_acct) if to_acct else None
                 db_execute(conn, "INSERT INTO transactions (date, description, category, amount, account_id, type, to_account_id, notes) VALUES (%s,%s,%s,%s,%s,%s,%s,NULL)",
                            (tx_date.strftime(DATE_FMT), desc, cat, float(amount), aid, ttype, taid))
-        if not table_exists_with_rows("holdings"):
-            investments_df.columns = [str(c).strip() for c in investments_df.columns]
-            investments_df = investments_df.dropna(how="all").rename(columns={"TICKER / NAME":"Ticker / Name","ACCOUNT":"Account","AMOUNT ($)":"Amount ($)","HOLDING AMT":"Holding Amt","AVG PRICE":"Avg Price"})
-            if {"Ticker / Name","Account","Amount ($)","Holding Amt","Avg Price"}.issubset(set(investments_df.columns)):
-                for _, row in investments_df.iterrows():
-                    name = str(row.get("Ticker / Name") or "").strip(); an = normalize_account_name(row.get("Account"))
-                    if not name or not an: continue
-                    ai_val = coerce_float(row.get("Amount ($)")); qty = coerce_float(row.get("Holding Amt")); ap = coerce_float(row.get("Avg Price"))
-                    aid = ensure_account(conn, an)
-                    if an == "Coinbase": at = "crypto" if "Cash" not in name else "cash"; sym = name; cg = CRYPTO_NAME_TO_ID.get(name, "")
-                    else: at = "etf" if any(t in name for t in ("QQQ","SPY")) else "stock"; sym = STOCK_NAME_TO_TICKER.get(name, name); cg = None
-                    db_execute(conn, "INSERT INTO holdings (symbol, display_name, asset_type, account_id, amount_invested, quantity, avg_price, coingecko_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                               (sym, name, at, aid, ai_val, qty, ap, cg))
         db_execute(conn, "INSERT INTO settings (key, value) VALUES ('migration_completed','1') ON CONFLICT(key) DO UPDATE SET value='1'")
         conn.commit()
     finally:
@@ -602,12 +691,10 @@ def get_setting_float(settings: dict[str, str], key: str) -> float:
 
 
 def _chart_theme(fig, title: str = "") -> object:
-    """Apply Black Book dark chart theme."""
     fig.update_layout(
         title=dict(text=title, font=dict(family="JetBrains Mono, monospace", size=10, color="#374151"),
                    x=0, xanchor="left", pad=dict(l=0, b=8)) if title else dict(text=""),
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         font=dict(color="#6b7280", size=10, family="JetBrains Mono, monospace"),
         legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor="rgba(255,255,255,0.04)",
                     borderwidth=1, font=dict(size=9, family="JetBrains Mono, monospace")),
@@ -615,24 +702,18 @@ def _chart_theme(fig, title: str = "") -> object:
         hoverlabel=dict(bgcolor="#0d1117", bordercolor="rgba(255,255,255,0.1)",
                         font=dict(family="JetBrains Mono, monospace", size=10)),
     )
-    fig.update_xaxes(
-        gridcolor="rgba(255,255,255,0.03)", zerolinecolor="rgba(255,255,255,0.05)",
-        tickfont=dict(size=9, family="JetBrains Mono, monospace"), showline=False,
-    )
-    fig.update_yaxes(
-        gridcolor="rgba(255,255,255,0.03)", zerolinecolor="rgba(255,255,255,0.05)",
-        tickfont=dict(size=9, family="JetBrains Mono, monospace"), showline=False,
-    )
+    fig.update_xaxes(gridcolor="rgba(255,255,255,0.03)", zerolinecolor="rgba(255,255,255,0.05)",
+                     tickfont=dict(size=9, family="JetBrains Mono, monospace"), showline=False)
+    fig.update_yaxes(gridcolor="rgba(255,255,255,0.03)", zerolinecolor="rgba(255,255,255,0.05)",
+                     tickfont=dict(size=9, family="JetBrains Mono, monospace"), showline=False)
     return fig
 
 
 def _pie_chart(labels, values, title="") -> go.Figure:
     fig = go.Figure(go.Pie(
-        labels=labels, values=values,
-        hole=0.6,
+        labels=labels, values=values, hole=0.6,
         marker=dict(colors=CHART_PALETTE, line=dict(color="#060810", width=2)),
-        textfont=dict(family="JetBrains Mono, monospace", size=9),
-        textposition="outside",
+        textfont=dict(family="JetBrains Mono, monospace", size=9), textposition="outside",
         hovertemplate="<b>%{label}</b><br>%{value:,.2f}<br>%{percent}<extra></extra>",
     ))
     _chart_theme(fig, title)
@@ -641,32 +722,21 @@ def _pie_chart(labels, values, title="") -> go.Figure:
 
 
 def _bar_chart(x, y, color=C_GREEN, title="", hline=None) -> go.Figure:
-    fig = go.Figure(go.Bar(
-        x=x, y=y,
-        marker=dict(
-            color=color,
-            opacity=0.85,
-            line=dict(width=0),
-        ),
-        hovertemplate="%{x}<br><b>$%{y:,.2f}</b><extra></extra>",
-    ))
+    fig = go.Figure(go.Bar(x=x, y=y, marker=dict(color=color, opacity=0.85, line=dict(width=0)),
+                           hovertemplate="%{x}<br><b>$%{y:,.2f}</b><extra></extra>"))
     if hline is not None:
         fig.add_hline(y=hline, line_dash="dot", line_color=C_GOLD, line_width=1,
-                      annotation_text="cap", annotation_font=dict(color=C_GOLD, size=8, family="JetBrains Mono, monospace"),
-                      annotation_position="top right")
+                      annotation_text="cap", annotation_font=dict(color=C_GOLD, size=8,
+                      family="JetBrains Mono, monospace"), annotation_position="top right")
     _chart_theme(fig, title)
     return fig
 
 
 def _line_chart(x, y, color=C_GREEN, title="") -> go.Figure:
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=x, y=y, mode="lines",
-        line=dict(color=color, width=2),
-        fill="tozeroy",
-        fillcolor=color.replace(")", ", 0.08)").replace("rgb(", "rgba(") if "rgb" in color else f"rgba(0,200,150,0.06)",
-        hovertemplate="<b>$%{y:,.2f}</b><extra></extra>",
-    ))
+    fig.add_trace(go.Scatter(x=x, y=y, mode="lines", line=dict(color=color, width=2),
+                             fill="tozeroy", fillcolor="rgba(0,200,150,0.06)",
+                             hovertemplate="<b>$%{y:,.2f}</b><extra></extra>"))
     _chart_theme(fig, title)
     return fig
 
@@ -693,12 +763,14 @@ def build_enriched_holdings(holdings_df: pd.DataFrame, price_cache_df: pd.DataFr
     enriched["current_value"] = enriched["quantity"] * enriched["latest_price"]
     enriched["current_value"] = enriched["current_value"].where(enriched["quantity"] > 0, enriched["amount_invested"])
     enriched["total_pnl"] = enriched["current_value"] - enriched["amount_invested"]
-    enriched["total_pnl_pct"] = enriched.apply(lambda r: safe_div(r["total_pnl"], r["amount_invested"]) if r["amount_invested"] else 0.0, axis=1)
+    enriched["total_pnl_pct"] = enriched.apply(
+        lambda r: safe_div(r["total_pnl"], r["amount_invested"]) if r["amount_invested"] else 0.0, axis=1)
     enriched["tdy_pnl"] = (enriched["latest_price"] - enriched["previous_close"]) * enriched["quantity"]
     return enriched
 
 
-def build_account_balances(accounts_df: pd.DataFrame, transactions_df: pd.DataFrame, holdings_df: pd.DataFrame, price_cache_df: pd.DataFrame) -> pd.DataFrame:
+def build_account_balances(accounts_df: pd.DataFrame, transactions_df: pd.DataFrame,
+                            holdings_df: pd.DataFrame, price_cache_df: pd.DataFrame) -> pd.DataFrame:
     balances = accounts_df.copy()
     balances["current_balance"] = _to_float_series(balances["starting_balance"])
     if transactions_df.empty:
@@ -750,11 +822,13 @@ def build_food_metrics(transactions_df: pd.DataFrame, settings: dict[str, str]) 
         "remaining_today": db - ts, "remaining_week": (db * 7) - ws_spent,
         "current_carry_surplus": cc, "lifetime_surplus": ls,
         "avg_daily_food_spend": adf, "food_days_tracked": ad,
-        "transactions_today": int(0 if transactions_df.empty else (pd.to_datetime(transactions_df["date"]).dt.date == today).sum()),
+        "transactions_today": int(0 if transactions_df.empty else
+                                  (pd.to_datetime(transactions_df["date"]).dt.date == today).sum()),
     }
 
 
-def build_runway(transactions_df: pd.DataFrame, balances_df: pd.DataFrame, food_metrics: dict[str, Any]) -> dict[str, float]:
+def build_runway(transactions_df: pd.DataFrame, balances_df: pd.DataFrame,
+                 food_metrics: dict[str, Any]) -> dict[str, float]:
     lc = float(balances_df.loc[balances_df["include_in_runway"] == 1, "display_balance"].sum())
     if transactions_df.empty:
         avg = food_metrics["avg_daily_food_spend"]
@@ -769,7 +843,14 @@ def build_runway(transactions_df: pd.DataFrame, balances_df: pd.DataFrame, food_
 def build_debt_summary(balances_df: pd.DataFrame) -> dict[str, Any]:
     ddf = balances_df.loc[balances_df["is_debt"] == 1, ["id", "name", "display_balance"]].copy()
     ddf["display_balance"] = _to_float_series(ddf["display_balance"]).clip(lower=0)
-    return {"total_debt": float(ddf["display_balance"].sum()), "by_account": ddf.sort_values("display_balance", ascending=False)}
+    return {"total_debt": float(ddf["display_balance"].sum()),
+            "by_account": ddf.sort_values("display_balance", ascending=False)}
+
+
+def build_net_worth(balances_df: pd.DataFrame) -> dict[str, float]:
+    assets = float(balances_df.loc[balances_df["is_debt"] == 0, "display_balance"].sum())
+    debt = float(balances_df.loc[balances_df["is_debt"] == 1, "display_balance"].clip(lower=0).sum())
+    return {"assets": assets, "debt": debt, "net_worth": assets - debt}
 
 
 def build_signals(balances_df, debt_summary, food_metrics, runway, settings) -> list[Signal]:
@@ -793,35 +874,95 @@ def build_signals(balances_df, debt_summary, food_metrics, runway, settings) -> 
     if checking < 50: signals.append(Signal("danger", "💸 Checking running low", "Below $50. Protect essentials."))
     if runway["runway_days"] < 14: signals.append(Signal("danger", "🛣 Runway short", "Under two weeks of runway."))
     elif runway["runway_days"] < 30: signals.append(Signal("warning", "🛣 Runway needs work", "Under a month of runway."))
-    if food_metrics["current_carry_surplus"] > food_metrics["daily_budget"] * 3: signals.append(Signal("success", "🍽 Food discipline paying off", "Healthy carry surplus built."))
+    if food_metrics["current_carry_surplus"] > food_metrics["daily_budget"] * 3:
+        signals.append(Signal("success", "🍽 Food discipline paying off", "Healthy carry surplus built."))
     if not signals: signals.append(Signal("success", "💰 Budget steady", "No pressure signals. Keep logging."))
     return sorted(signals, key=lambda s: {"danger": 0, "warning": 1, "success": 2}[s.level])
 
 
-def compute_paycheck_allocation(paycheck_amount: float, settings: dict[str, str], debt_df: pd.DataFrame) -> dict[str, Any]:
+def compute_paycheck_allocation(paycheck_amount: float, settings: dict[str, str],
+                                 debt_df: pd.DataFrame, food_surplus: float = 0.0) -> dict[str, Any]:
+    """
+    Upgraded allocation engine:
+    - Due-date aware: if payment due within pay period, reserves full debt balance
+    - Food surplus automatically routes to surplus_savings bucket
+    - DCA targets printed as checklist
+    """
     ppd = int(get_setting_float(settings, "pay_period_days") or 14)
+    due_day = int(get_setting_float(settings, "due_day") or 27)
+    today = date.today()
+
+    # Check if payment is due within this pay period
+    due_date = date(today.year, today.month, min(due_day, 28))
+    if today.day > due_day:
+        nm = today.replace(day=28) + timedelta(days=4)
+        due_date = date(nm.year, nm.month, min(due_day, 28))
+    days_to_due = (due_date - today).days
+    payment_due_this_period = days_to_due <= ppd
+
     fr = max(get_setting_float(settings, "daily_food_budget") * ppd, 0.0)
     raf = max(paycheck_amount - fr, 0.0)
     td = float(debt_df["display_balance"].sum()) if not debt_df.empty else 0.0
-    dr = min(td, raf); rad = max(raf - dr, 0.0)
+
+    # Due-date aware: if payment due this period, reserve full debt; otherwise proportional
+    if payment_due_this_period and td > 0:
+        dr = min(td, raf)  # Reserve full debt amount
+    else:
+        dr = min(td * 0.5, raf)  # Reserve half as a maintenance payment when not due
+
+    rad = max(raf - dr, 0.0)
+    surplus_savings = max(food_surplus, 0.0)
+
     bd: list[dict[str, Any]] = []
     if td > 0 and dr > 0 and not debt_df.empty:
         tmp = debt_df.copy(); tmp["share"] = tmp["display_balance"] / td
         for _, r in tmp.iterrows():
-            bd.append({"account_id": int(r["id"]), "account": r["name"], "debt_balance": float(r["display_balance"]), "allocation": float(dr * r["share"])})
+            bd.append({"account_id": int(r["id"]), "account": r["name"],
+                       "debt_balance": float(r["display_balance"]),
+                       "allocation": float(dr * r["share"])})
+
+    savings_r = rad * get_setting_float(settings, "savings_pct")
+    spending_r = rad * get_setting_float(settings, "spending_pct")
+    crypto_r = rad * get_setting_float(settings, "crypto_pct")
+    taxable_r = rad * get_setting_float(settings, "taxable_investing_pct")
+    roth_r = rad * get_setting_float(settings, "roth_ira_pct")
+
+    # DCA targets
+    dca_targets = []
+    if crypto_r > 0:
+        dca_targets.append({"platform": "Coinbase", "amount": crypto_r,
+                             "note": "Buy crypto — execute manually on Coinbase"})
+    if taxable_r > 0:
+        dca_targets.append({"platform": "Fidelity (Taxable)", "amount": taxable_r,
+                             "note": "Buy index funds — execute manually on Fidelity"})
+    if roth_r > 0:
+        dca_targets.append({"platform": "Fidelity (Roth IRA)", "amount": roth_r,
+                             "note": "Buy into Roth — execute manually on Fidelity"})
+
     return {
-        "paycheck_amount": paycheck_amount, "run_date": date.today().strftime(DATE_FMT),
-        "debt_total": td, "food_reserved": fr, "debt_reserved": dr,
-        "remaining_after_food": raf, "remaining_after_debt": rad,
-        "savings_reserved": rad * get_setting_float(settings, "savings_pct"),
-        "spending_reserved": rad * get_setting_float(settings, "spending_pct"),
-        "crypto_reserved": rad * get_setting_float(settings, "crypto_pct"),
-        "taxable_reserved": rad * get_setting_float(settings, "taxable_investing_pct"),
-        "roth_reserved": rad * get_setting_float(settings, "roth_ira_pct"),
+        "paycheck_amount": paycheck_amount,
+        "run_date": today.strftime(DATE_FMT),
+        "debt_total": td,
+        "food_reserved": fr,
+        "debt_reserved": dr,
+        "remaining_after_food": raf,
+        "remaining_after_debt": rad,
+        "savings_reserved": savings_r,
+        "surplus_savings": surplus_savings,
+        "spending_reserved": spending_r,
+        "crypto_reserved": crypto_r,
+        "taxable_reserved": taxable_r,
+        "roth_reserved": roth_r,
         "debt_breakdown": bd,
-        "meta": {"pay_period_days": ppd, "allocation_mode": settings.get("debt_allocation_mode", "proportional")},
+        "dca_targets": dca_targets,
+        "payment_due_this_period": payment_due_this_period,
+        "days_to_due": days_to_due,
+        "meta": {"pay_period_days": ppd, "payment_due_this_period": payment_due_this_period,
+                 "debt_allocation_mode": "full" if payment_due_this_period else "maintenance"},
     }
 
+
+# ── Price fetching ─────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_yfinance_prices(symbols: tuple[str, ...]) -> dict[str, dict[str, float | None]]:
@@ -864,7 +1005,7 @@ def maybe_refresh_prices(holdings_df: pd.DataFrame, force: bool = False) -> tupl
     mcp = now.time() >= time(hour=16, minute=15)
     ard = settings.get("last_price_refresh_at", "").startswith(date.today().strftime(DATE_FMT))
     if not (force or (mcp and not ard)): return False, "Using cached prices."
-    stock_syms = tuple(sorted(set(holdings_df.loc[holdings_df["asset_type"].isin(["stock","etf"]),"symbol"].astype(str))))
+    stock_syms = tuple(sorted(set(holdings_df.loc[holdings_df["asset_type"].isin(["stock", "etf"]), "symbol"].astype(str))))
     cr = holdings_df.loc[holdings_df["asset_type"].eq("crypto") & holdings_df["coingecko_id"].fillna("").ne("")]
     coin_ids = tuple(sorted(set(cr["coingecko_id"].astype(str))))
     sp = fetch_yfinance_prices(stock_syms); cp = {}
@@ -874,19 +1015,17 @@ def maybe_refresh_prices(holdings_df: pd.DataFrame, force: bool = False) -> tupl
     aod = date.today().strftime(DATE_FMT); refreshed = 0
     for _, row in holdings_df.iterrows():
         sym = str(row["symbol"]); at = str(row["asset_type"])
-        if at in {"stock","etf"}: pi=sp.get(sym,{}); price=pi.get("price"); prev=pi.get("previous_close"); src="yfinance"
-        elif at == "crypto": cid=str(row.get("coingecko_id") or ""); pi=cp.get(cid,{}); price=pi.get("price"); prev=pi.get("previous_close"); src="coingecko"
-        else: price=row["avg_price"] or 1.0; prev=row["avg_price"] or 1.0; src="internal"
+        if at in {"stock", "etf"}:
+            pi = sp.get(sym, {}); price = pi.get("price"); prev = pi.get("previous_close"); src = "yfinance"
+        elif at == "crypto":
+            cid = str(row.get("coingecko_id") or ""); pi = cp.get(cid, {})
+            price = pi.get("price"); prev = pi.get("previous_close"); src = "coingecko"
+        else:
+            price = row["avg_price"] or 1.0; prev = row["avg_price"] or 1.0; src = "internal"
         if price is None: continue
         upsert_price(sym, at, float(price), float(prev) if prev else None, src, aod); refreshed += 1
     set_settings({"last_price_refresh_at": now.isoformat(timespec="seconds")})
     return True, f"Refreshed {refreshed} holding price(s)."
-
-
-def build_net_worth(balances_df: pd.DataFrame) -> dict[str, float]:
-    assets = float(balances_df.loc[balances_df["is_debt"] == 0, "display_balance"].sum())
-    debt = float(balances_df.loc[balances_df["is_debt"] == 1, "display_balance"].clip(lower=0).sum())
-    return {"assets": assets, "debt": debt, "net_worth": assets - debt}
 
 
 def prepare_report_frames(transactions_df: pd.DataFrame) -> dict[str, pd.DataFrame]:
@@ -895,7 +1034,115 @@ def prepare_report_frames(transactions_df: pd.DataFrame) -> dict[str, pd.DataFra
     return {"spending": tx.loc[tx["type"] == "Expense"].copy(), "food": tx.loc[tx["category"] == "Food"].copy()}
 
 
-# ── Renderers ─────────────────────────────────────────────────────────────────
+# ── Google Calendar ───────────────────────────────────────────────────────────
+
+def get_google_calendar_events() -> list[dict]:
+    if not _GOOGLE_AVAILABLE:
+        return []
+    try:
+        client_id = st.secrets.get("GOOGLE_CLIENT_ID", "")
+        client_secret = st.secrets.get("GOOGLE_CLIENT_SECRET", "")
+        refresh_token = st.secrets.get("GOOGLE_REFRESH_TOKEN", "")
+        if not all([client_id, client_secret, refresh_token]):
+            return []
+        creds = Credentials(
+            token=None, refresh_token=refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=client_id, client_secret=client_secret,
+            scopes=["https://www.googleapis.com/auth/calendar.readonly"],
+        )
+        service = google_build("calendar", "v3", credentials=creds, cache_discovery=False)
+        now_iso = datetime.utcnow().isoformat() + "Z"
+        week_end = (datetime.utcnow() + timedelta(days=7)).isoformat() + "Z"
+        result = service.events().list(
+            calendarId="primary", timeMin=now_iso, timeMax=week_end,
+            maxResults=20, singleEvents=True, orderBy="startTime"
+        ).execute()
+        return result.get("items", [])
+    except Exception:
+        return []
+
+
+# ── Capital One CSV reconciliation ────────────────────────────────────────────
+
+def parse_capital_one_csv(uploaded_file) -> pd.DataFrame:
+    """Parse Capital One CSV export format."""
+    try:
+        df = pd.read_csv(uploaded_file)
+        df.columns = [c.strip() for c in df.columns]
+        # Capital One format: Transaction Date, Posted Date, Card No., Description, Category, Debit, Credit
+        col_map = {}
+        for c in df.columns:
+            cl = c.lower().strip()
+            if "transaction date" in cl or cl == "date": col_map[c] = "date"
+            elif "description" in cl: col_map[c] = "description"
+            elif "debit" in cl: col_map[c] = "debit"
+            elif "credit" in cl: col_map[c] = "credit"
+        df = df.rename(columns=col_map)
+        if "date" not in df.columns:
+            return pd.DataFrame()
+        df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
+        df = df.dropna(subset=["date"])
+        # Combine debit and credit into signed amount
+        if "debit" in df.columns and "credit" in df.columns:
+            df["debit"] = pd.to_numeric(df["debit"], errors="coerce").fillna(0.0)
+            df["credit"] = pd.to_numeric(df["credit"], errors="coerce").fillna(0.0)
+            df["amount"] = df["debit"].where(df["debit"] > 0, df["credit"])
+            df["direction"] = df.apply(lambda r: "debit" if r["debit"] > 0 else "credit", axis=1)
+        elif "amount" in df.columns:
+            df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0.0).abs()
+            df["direction"] = "debit"
+        df["description"] = df.get("description", pd.Series([""] * len(df))).astype(str).str.strip()
+        return df[["date", "description", "amount", "direction"]].copy()
+    except Exception:
+        return pd.DataFrame()
+
+
+def reconcile_transactions(cap_one_df: pd.DataFrame, logged_df: pd.DataFrame,
+                            account_name: str) -> pd.DataFrame:
+    """Compare Capital One statement against logged transactions."""
+    if cap_one_df.empty: return pd.DataFrame()
+    account_logged = logged_df[logged_df["account"] == account_name].copy() if not logged_df.empty else pd.DataFrame()
+    results = []
+    for _, cap_row in cap_one_df.iterrows():
+        cap_date = cap_row["date"]
+        cap_amount = float(cap_row["amount"])
+        cap_desc = str(cap_row["description"])
+        # Look for matching transaction within 2 days and within $0.01
+        match = None
+        if not account_logged.empty:
+            candidates = account_logged[
+                (abs(pd.to_datetime(account_logged["date"]).dt.date.apply(lambda d: (d - cap_date).days)) <= 2) &
+                (abs(account_logged["amount"] - cap_amount) < 0.02)
+            ]
+            if not candidates.empty:
+                match = candidates.iloc[0]
+        if match is not None:
+            results.append({
+                "Status": "✅ Matched",
+                "Statement Date": str(cap_date),
+                "Statement Desc": cap_desc[:40],
+                "Statement Amount": format_currency(cap_amount),
+                "Logged Date": str(match["date"]),
+                "Logged Desc": str(match["description"])[:40],
+                "Logged Amount": format_currency(float(match["amount"])),
+                "Delta": "$0.00",
+            })
+        else:
+            results.append({
+                "Status": "❌ Missing",
+                "Statement Date": str(cap_date),
+                "Statement Desc": cap_desc[:40],
+                "Statement Amount": format_currency(cap_amount),
+                "Logged Date": "—",
+                "Logged Desc": "Not logged",
+                "Logged Amount": "—",
+                "Delta": format_currency(cap_amount),
+            })
+    return pd.DataFrame(results)
+
+
+# ── Render helpers ────────────────────────────────────────────────────────────
 
 def render_signal(signal: Signal) -> None:
     colors = {"danger": C_RED, "warning": C_GOLD, "success": C_GREEN}
@@ -910,6 +1157,8 @@ def render_signal(signal: Signal) -> None:
         unsafe_allow_html=True)
 
 
+# ── Page renderers ────────────────────────────────────────────────────────────
+
 def render_dashboard(settings, transactions_df, holdings_df, balances_df, price_cache_df) -> None:
     food = build_food_metrics(transactions_df, settings)
     runway = build_runway(transactions_df, balances_df, food)
@@ -918,12 +1167,10 @@ def render_dashboard(settings, transactions_df, holdings_df, balances_df, price_
     signals = build_signals(balances_df, debt, food, runway, settings)
     latest_allocation = load_allocation_snapshots(limit=1)
 
-    # ── Title
     st.markdown('<div class="bb-title">Black Book</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="bb-subtitle">Personal Finance · {date.today().strftime("%B %d, %Y")}</div>', unsafe_allow_html=True)
     render_signal(signals[0])
 
-    # ── Top metrics
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Daily Food Left", format_currency(food["remaining_today"]), format_currency(-food["food_spent_today"]))
     m2.metric("Weekly Food Left", format_currency(food["remaining_week"]), format_currency(-food["food_spent_week"]))
@@ -937,14 +1184,14 @@ def render_dashboard(settings, transactions_df, holdings_df, balances_df, price_
     s4.metric("Txns Today", str(food["transactions_today"]))
 
     left, right = st.columns([1.1, 0.9])
-
     with left:
         st.subheader("Accounts")
         sorted_bal = balances_df.sort_values("sort_order")
         acct_display = pd.DataFrame({
             "Account": [str(x) for x in sorted_bal["name"].tolist()],
             "Balance": [format_currency(float(x)) for x in sorted_bal["display_balance"].tolist()],
-            "Type": ["Debt" if int(r["is_debt"]) else str(r["account_type"]).title() for _, r in sorted_bal.iterrows()],
+            "Type": ["Debt" if int(r["is_debt"]) else str(r["account_type"]).title()
+                     for _, r in sorted_bal.iterrows()],
         })
         st.dataframe(acct_display, use_container_width=True, hide_index=True)
 
@@ -960,206 +1207,605 @@ def render_dashboard(settings, transactions_df, holdings_df, balances_df, price_
 
     with right:
         reports = prepare_report_frames(transactions_df)
-
         if not reports["spending"].empty:
             st.subheader("Spending Mix")
             sc = reports["spending"].groupby("category", as_index=False)["amount"].sum()
             fig = _pie_chart(sc["category"].tolist(), sc["amount"].tolist())
             st.plotly_chart(fig, use_container_width=True)
-
         if not reports["food"].empty:
             st.subheader("Food Trend")
             daily_food = reports["food"].groupby(reports["food"]["date"].dt.date, as_index=False)["amount"].sum()
             fig = _bar_chart(daily_food["date"].tolist(), daily_food["amount"].tolist(),
                              color=C_GREEN, hline=get_setting_float(settings, "daily_food_budget"))
             st.plotly_chart(fig, use_container_width=True)
-
         st.subheader("Last Paycheck")
         if latest_allocation.empty:
-            preview = compute_paycheck_allocation(580.0, settings, debt["by_account"])
+            preview = compute_paycheck_allocation(580.0, settings, debt["by_account"],
+                                                   food_surplus=food["current_carry_surplus"])
             st.caption("Preview — no snapshot saved yet.")
         else:
             preview = latest_allocation.iloc[0].to_dict()
         alloc_df = pd.DataFrame([
             ("Food", preview["food_reserved"]), ("Debt", preview["debt_reserved"]),
-            ("Savings", preview["savings_reserved"]), ("Spending", preview["spending_reserved"]),
-            ("Crypto", preview["crypto_reserved"]), ("Taxable", preview.get("taxable_reserved", 0.0)),
+            ("Savings", preview["savings_reserved"]),
+            ("Surplus Savings", preview.get("surplus_savings", 0.0)),
+            ("Spending", preview["spending_reserved"]),
+            ("Crypto", preview["crypto_reserved"]),
+            ("Taxable", preview.get("taxable_reserved", 0.0)),
             ("Roth IRA", preview.get("roth_reserved", 0.0)),
         ], columns=["Bucket", "Amount"])
-        st.dataframe(alloc_df.assign(Amount=alloc_df["Amount"].map(format_currency)), use_container_width=True, hide_index=True)
+        st.dataframe(alloc_df.assign(Amount=alloc_df["Amount"].map(format_currency)),
+                     use_container_width=True, hide_index=True)
 
 
-def render_log_transaction(accounts_df: pd.DataFrame) -> None:
+def render_log_transaction(accounts_df: pd.DataFrame, transactions_df: pd.DataFrame) -> None:
     st.markdown('<div class="bb-title">Log Transaction</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="bb-subtitle">Record a money move</div>', unsafe_allow_html=True)
+    st.markdown('<div class="bb-subtitle">Record a money move</div>', unsafe_allow_html=True)
+
+    tab1, tab2 = st.tabs(["Add Transaction", "Delete Transaction"])
+
     sorted_accts = accounts_df.sort_values("sort_order")
     names = [str(x) for x in sorted_accts["name"].tolist()]
     ids = [int(x) for x in sorted_accts["id"].tolist()]
     account_name_to_id = dict(zip(names, ids))
-    with st.form("transaction_form", clear_on_submit=True):
-        c1, c2, c3 = st.columns([1, 2, 1])
-        tx_date = c1.date_input("Date", value=date.today())
-        description = c2.text_input("Description", placeholder="Chick-fil-A, paycheck, rent...")
-        amount = c3.number_input("Amount", min_value=0.0, step=0.01, format="%.2f")
-        c4, c5, c6 = st.columns(3)
-        category = c4.selectbox("Category", COMMON_CATEGORIES, index=0)
-        account = c5.selectbox("Account", list(account_name_to_id))
-        tx_type = c6.selectbox("Type", ["Expense", "Income", "Transfer"])
-        to_account = None
-        notes = st.text_area("Notes", placeholder="Optional note...")
-        if tx_type == "Transfer":
-            to_account = st.selectbox("To Account", [""] + [n for n in account_name_to_id if n != account])
-        submitted = st.form_submit_button("Save Transaction", type="primary")
-        if submitted:
-            if not description.strip(): st.error("Description is required.")
-            elif amount <= 0: st.error("Amount must be greater than zero.")
-            elif tx_type == "Transfer" and not to_account: st.error("Transfers need a destination.")
-            else:
-                add_transaction(tx_date, description, category, float(amount),
-                                int(account_name_to_id[account]), tx_type,
-                                int(account_name_to_id[to_account]) if to_account else None, notes)
-                st.success("Transaction saved."); st.rerun()
+
+    with tab1:
+        with st.form("transaction_form", clear_on_submit=True):
+            c1, c2, c3 = st.columns([1, 2, 1])
+            tx_date = c1.date_input("Date", value=date.today())
+            description = c2.text_input("Description", placeholder="Chick-fil-A, paycheck, rent...")
+            amount = c3.number_input("Amount", min_value=0.0, step=0.01, format="%.2f")
+            c4, c5, c6 = st.columns(3)
+            category = c4.selectbox("Category", COMMON_CATEGORIES, index=0)
+            account = c5.selectbox("From Account", list(account_name_to_id))
+            tx_type = c6.selectbox("Type", ["Expense", "Income", "Transfer"])
+            to_account = None
+            notes = st.text_area("Notes", placeholder="Optional note...")
+            if tx_type in ("Transfer", "Expense"):
+                to_account_options = [""] + [n for n in account_name_to_id if n != account]
+                to_account_label = "To Account" if tx_type == "Transfer" else "To Account (optional — e.g. debt payment destination)"
+                to_account = st.selectbox(to_account_label, to_account_options)
+            submitted = st.form_submit_button("Save Transaction", type="primary")
+            if submitted:
+                if not description.strip(): st.error("Description is required.")
+                elif amount <= 0: st.error("Amount must be greater than zero.")
+                elif tx_type == "Transfer" and not to_account: st.error("Transfers need a destination.")
+                else:
+                    add_transaction(tx_date, description, category, float(amount),
+                                    int(account_name_to_id[account]), tx_type,
+                                    int(account_name_to_id[to_account]) if to_account else None, notes)
+                    st.success("Transaction saved."); st.rerun()
+
+    with tab2:
+        if transactions_df.empty:
+            st.info("No transactions to delete yet.")
+        else:
+            st.caption("Select a transaction to review and delete it permanently.")
+            recent = transactions_df.head(50).copy()
+            recent["label"] = (recent["date"].astype(str) + " · " +
+                                recent["description"].str[:30] + " · " +
+                                recent["amount"].map(format_currency) + " · " +
+                                recent["account"])
+            labels = recent["label"].tolist()
+            ids_list = [int(x) for x in recent["id"].tolist()]
+            label_to_id = dict(zip(labels, ids_list))
+            selected = st.selectbox("Select transaction", [""] + labels)
+            if selected and selected in label_to_id:
+                tx_id = label_to_id[selected]
+                row = recent[recent["id"] == tx_id].iloc[0]
+                st.markdown(f"""
+                <div style="background:#0d1117;border:1px solid {C_RED}33;border-radius:2px;padding:0.8rem 1rem;margin:0.5rem 0">
+                <div style="font-family:JetBrains Mono,monospace;font-size:0.7rem;color:#6b7280">SELECTED TRANSACTION</div>
+                <div style="font-family:JetBrains Mono,monospace;font-size:0.85rem;color:#e2e8f0;margin-top:0.3rem">
+                {row['date']} · {row['description']} · {format_currency(float(row['amount']))} · {row['account']}
+                </div></div>""", unsafe_allow_html=True)
+                confirm = st.checkbox("I confirm I want to permanently delete this transaction")
+                if confirm:
+                    if st.button("Delete Transaction", type="primary"):
+                        delete_transaction(tx_id)
+                        st.success("Transaction deleted."); st.rerun()
 
 
-def render_paycheck_allocation(settings: dict[str, str], balances_df: pd.DataFrame) -> None:
+def render_paycheck_allocation(settings: dict[str, str], balances_df: pd.DataFrame,
+                                food_metrics: dict[str, Any]) -> None:
     st.markdown('<div class="bb-title">Paycheck Allocation</div>', unsafe_allow_html=True)
     st.markdown('<div class="bb-subtitle">Break down your next deposit</div>', unsafe_allow_html=True)
     debt_df = build_debt_summary(balances_df)["by_account"]
+
     c1, c2 = st.columns([0.9, 1.1])
     with c1:
         paycheck_amount = st.number_input("Paycheck Amount", min_value=0.0, value=580.0, step=10.0, format="%.2f")
-        allocation = compute_paycheck_allocation(float(paycheck_amount), settings, debt_df)
+        food_surplus = food_metrics.get("current_carry_surplus", 0.0)
+        allocation = compute_paycheck_allocation(float(paycheck_amount), settings, debt_df,
+                                                  food_surplus=food_surplus)
+
+        # Due date alert
+        if allocation["payment_due_this_period"]:
+            st.markdown(f'<div style="border-left:2px solid {C_RED};padding:0.4rem 0.8rem;background:rgba(255,77,77,0.05);margin-bottom:0.5rem;font-family:JetBrains Mono,monospace;font-size:0.65rem;color:{C_RED}">PAYMENT DUE IN {allocation["days_to_due"]} DAYS — FULL DEBT RESERVED</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div style="border-left:2px solid {C_GOLD};padding:0.4rem 0.8rem;background:rgba(240,165,0,0.05);margin-bottom:0.5rem;font-family:JetBrains Mono,monospace;font-size:0.65rem;color:{C_GOLD}">PAYMENT DUE IN {allocation["days_to_due"]} DAYS — MAINTENANCE RESERVE</div>', unsafe_allow_html=True)
+
         st.metric("Debt Total", format_currency(allocation["debt_total"]))
         st.metric("Food Reserve", format_currency(allocation["food_reserved"]))
+        st.metric("Food Surplus → Savings", format_currency(food_surplus))
         st.metric("After Food", format_currency(allocation["remaining_after_food"]))
         st.metric("After Debt", format_currency(allocation["remaining_after_debt"]))
         if st.button("Save Snapshot", type="primary"):
             save_allocation_snapshot(allocation); st.success("Saved."); st.rerun()
+
     with c2:
-        alloc_rows = [("Food", allocation["food_reserved"]), ("Debt", allocation["debt_reserved"]),
-                      ("Savings", allocation["savings_reserved"]), ("Spending", allocation["spending_reserved"]),
-                      ("Crypto", allocation["crypto_reserved"]), ("Taxable", allocation["taxable_reserved"]),
-                      ("Roth IRA", allocation["roth_reserved"])]
+        alloc_rows = [
+            ("Food", allocation["food_reserved"]),
+            ("Debt", allocation["debt_reserved"]),
+            ("Savings", allocation["savings_reserved"]),
+            ("Surplus Savings ✦", allocation["surplus_savings"]),
+            ("Spending", allocation["spending_reserved"]),
+            ("Crypto", allocation["crypto_reserved"]),
+            ("Taxable", allocation["taxable_reserved"]),
+            ("Roth IRA", allocation["roth_reserved"]),
+        ]
         alloc_df = pd.DataFrame(alloc_rows, columns=["Bucket", "Amount"])
         alloc_df["Share"] = alloc_df["Amount"].apply(lambda x: safe_div(x, allocation["paycheck_amount"]))
-        st.dataframe(alloc_df.assign(Amount=alloc_df["Amount"].map(format_currency), Share=alloc_df["Share"].map(format_percent)),
+        st.dataframe(alloc_df.assign(Amount=alloc_df["Amount"].map(format_currency),
+                                      Share=alloc_df["Share"].map(format_percent)),
                      use_container_width=True, hide_index=True)
+
         if allocation["debt_breakdown"]:
             st.subheader("Debt Split")
             dbd = pd.DataFrame(allocation["debt_breakdown"])
-            st.dataframe(dbd.assign(debt_balance=dbd["debt_balance"].map(format_currency), allocation=dbd["allocation"].map(format_currency))[["account","debt_balance","allocation"]],
+            st.dataframe(dbd.assign(debt_balance=dbd["debt_balance"].map(format_currency),
+                                    allocation=dbd["allocation"].map(format_currency))
+                         [["account", "debt_balance", "allocation"]],
                          use_container_width=True, hide_index=True)
+
+        if allocation["dca_targets"]:
+            st.subheader("DCA Checklist — Execute Manually")
+            for target in allocation["dca_targets"]:
+                st.markdown(
+                    f'<div style="display:flex;justify-content:space-between;align-items:center;'
+                    f'background:#0d1117;border:1px solid rgba(255,255,255,0.05);border-radius:2px;'
+                    f'padding:0.6rem 0.8rem;margin-bottom:0.4rem">'
+                    f'<div><div style="font-family:JetBrains Mono,monospace;font-size:0.72rem;color:#e2e8f0">'
+                    f'{target["platform"]}</div>'
+                    f'<div style="font-family:JetBrains Mono,monospace;font-size:0.6rem;color:#374151">'
+                    f'{target["note"]}</div></div>'
+                    f'<div style="font-family:JetBrains Mono,monospace;font-size:1rem;color:{C_GREEN}">'
+                    f'{format_currency(target["amount"])}</div></div>',
+                    unsafe_allow_html=True)
+
     history = load_allocation_snapshots(limit=8)
     st.subheader("Recent Snapshots")
     if history.empty:
         st.info("Save a paycheck allocation to build your history.")
     else:
-        display = history[["run_date","paycheck_amount","food_reserved","debt_reserved","savings_reserved","spending_reserved","crypto_reserved","taxable_reserved","roth_reserved"]].copy()
+        display = history[["run_date", "paycheck_amount", "food_reserved", "debt_reserved",
+                            "savings_reserved", "surplus_savings", "spending_reserved",
+                            "crypto_reserved", "taxable_reserved", "roth_reserved"]].copy()
         for col in display.columns:
             if col != "run_date": display[col] = display[col].map(format_currency)
         st.dataframe(display, use_container_width=True, hide_index=True)
 
 
-def render_investments(holdings_df: pd.DataFrame, price_cache_df: pd.DataFrame) -> None:
+def render_investments(holdings_df: pd.DataFrame, price_cache_df: pd.DataFrame,
+                        accounts_df: pd.DataFrame) -> None:
     st.markdown('<div class="bb-title">Investments</div>', unsafe_allow_html=True)
     st.markdown('<div class="bb-subtitle">Portfolio overview</div>', unsafe_allow_html=True)
-    if holdings_df.empty:
-        st.info("No holdings yet."); return
-    refreshed, message = maybe_refresh_prices(holdings_df, force=False)
-    if refreshed: price_cache_df = load_price_cache()
-    if message: st.caption(message)
-    _, c2 = st.columns([0.7, 0.3])
-    with c2:
-        if st.button("Refresh Prices", type="primary"):
-            _, msg = maybe_refresh_prices(holdings_df, force=True); st.success(msg); st.rerun()
-    enriched = build_enriched_holdings(holdings_df, price_cache_df)
-    tv = float(enriched["current_value"].sum()); ti = float(enriched["amount_invested"].sum())
-    tp = float(enriched["total_pnl"].sum()); tdp = float(enriched["tdy_pnl"].sum())
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Portfolio Value", format_currency(tv))
-    m2.metric("Cost Basis", format_currency(ti))
-    m3.metric("Total PnL", format_currency(tp), format_percent(safe_div(tp, ti)))
-    m4.metric("Today PnL", format_currency(tdp))
-    t1, t2, t3 = st.tabs(["Today", "Total PnL", "Prices"])
-    with t1:
-        v = enriched[["display_name","account","quantity","latest_price","previous_close","tdy_pnl"]].copy()
-        v["latest_price"]=v["latest_price"].map(format_currency); v["previous_close"]=v["previous_close"].map(format_currency); v["tdy_pnl"]=v["tdy_pnl"].map(format_currency)
-        st.dataframe(v, use_container_width=True, hide_index=True)
-    with t2:
-        v = enriched[["display_name","account","amount_invested","current_value","total_pnl","total_pnl_pct"]].copy()
-        v["amount_invested"]=v["amount_invested"].map(format_currency); v["current_value"]=v["current_value"].map(format_currency)
-        v["total_pnl"]=v["total_pnl"].map(format_currency); v["total_pnl_pct"]=v["total_pnl_pct"].map(format_percent)
-        st.dataframe(v, use_container_width=True, hide_index=True)
-    with t3:
-        v = enriched[["display_name","symbol","account","latest_price","price_source","fetched_at"]].copy()
-        v["latest_price"]=v["latest_price"].map(format_currency)
-        st.dataframe(v, use_container_width=True, hide_index=True)
-    st.subheader("Allocation")
-    ac1, ac2 = st.columns(2)
-    with ac1:
-        ba = enriched.groupby("account", as_index=False)["current_value"].sum()
-        fig = _pie_chart(ba["account"].tolist(), ba["current_value"].tolist(), "By Account")
-        st.plotly_chart(fig, use_container_width=True)
-    with ac2:
-        bv = enriched.groupby("asset_type", as_index=False)["current_value"].sum()
-        fig = _pie_chart(bv["asset_type"].tolist(), bv["current_value"].tolist(), "By Asset Type")
-        st.plotly_chart(fig, use_container_width=True)
-    history = load_price_history()
-    if not history.empty:
-        vh = history.merge(holdings_df[["symbol","asset_type","quantity"]], on=["symbol","asset_type"], how="left")
-        vh["quantity"] = vh["quantity"].fillna(0.0); vh["portfolio_value"] = vh["price"] * vh["quantity"]
-        merged = vh.groupby("as_of_date", as_index=False)["portfolio_value"].sum()
-        fig = _line_chart(merged["as_of_date"].tolist(), merged["portfolio_value"].tolist(), title="Portfolio Value")
-        st.plotly_chart(fig, use_container_width=True)
-    st.download_button("Export Holdings CSV", data=enriched.to_csv(index=False).encode("utf-8"), file_name="holdings.csv", mime="text/csv")
 
+    tab1, tab2 = st.tabs(["Portfolio", "Manage Holdings"])
 
-def render_reports(settings, transactions_df, holdings_df, price_cache_df) -> None:
-    st.markdown('<div class="bb-title">Reports</div>', unsafe_allow_html=True)
-    st.markdown('<div class="bb-subtitle">Spending analysis</div>', unsafe_allow_html=True)
-    if transactions_df.empty:
-        st.info("Log transactions to see reports."); return
-    tx = transactions_df.copy(); tx["date"] = pd.to_datetime(tx["date"])
-    min_d, max_d = tx["date"].min().date(), tx["date"].max().date()
-    c1, c2 = st.columns(2)
-    start_date = c1.date_input("From", value=min_d, min_value=min_d, max_value=max_d)
-    end_date = c2.date_input("To", value=max_d, min_value=min_d, max_value=max_d)
-    filtered = tx.loc[(tx["date"].dt.date >= start_date) & (tx["date"].dt.date <= end_date)].copy()
-    expense_df = filtered.loc[filtered["type"] == "Expense"].copy()
-    food_df = filtered.loc[filtered["category"] == "Food"].copy()
-    ch1, ch2 = st.columns(2)
-    with ch1:
-        if not expense_df.empty:
-            bc = expense_df.groupby("category", as_index=False)["amount"].sum()
-            fig = _pie_chart(bc["category"].tolist(), bc["amount"].tolist(), "Spending by Category")
-            st.plotly_chart(fig, use_container_width=True)
-    with ch2:
-        if not food_df.empty:
-            ft = food_df.groupby(food_df["date"].dt.date, as_index=False)["amount"].sum()
-            fig = _bar_chart(ft["date"].tolist(), ft["amount"].tolist(), color=C_GREEN,
-                             title="Food Trend", hline=get_setting_float(settings, "daily_food_budget"))
-            st.plotly_chart(fig, use_container_width=True)
-    ch3, ch4 = st.columns(2)
-    with ch3:
-        if not expense_df.empty:
-            wb = get_setting_float(settings, "daily_food_budget") * 7
-            wg = expense_df.loc[expense_df["category"] == "Food"].copy()
-            wg["week"] = wg["date"].dt.to_period("W").astype(str)
-            fw = wg.groupby("week", as_index=False)["amount"].sum()
-            if not fw.empty:
-                fig = go.Figure()
-                fig.add_bar(x=fw["week"].tolist(), y=fw["amount"].tolist(), name="Food", marker_color=C_GREEN, marker_opacity=0.85)
-                fig.add_scatter(x=fw["week"].tolist(), y=[wb]*len(fw), name="Budget", mode="lines",
-                                line=dict(color=C_GOLD, dash="dot", width=1))
-                _chart_theme(fig, "Food vs Weekly Budget"); st.plotly_chart(fig, use_container_width=True)
-    with ch4:
-        if not holdings_df.empty:
+    with tab1:
+        if holdings_df.empty:
+            st.info("No holdings yet. Add them in the Manage Holdings tab.")
+        else:
+            refreshed, message = maybe_refresh_prices(holdings_df, force=False)
+            if refreshed: price_cache_df = load_price_cache()
+            if message: st.caption(message)
+            _, c2 = st.columns([0.7, 0.3])
+            with c2:
+                if st.button("Refresh Prices", type="primary"):
+                    _, msg = maybe_refresh_prices(holdings_df, force=True); st.success(msg); st.rerun()
             enriched = build_enriched_holdings(holdings_df, price_cache_df)
-            ba = enriched.groupby("asset_type", as_index=False)["current_value"].sum()
-            fig = _bar_chart(ba["asset_type"].tolist(), ba["current_value"].tolist(), color=C_BLUE, title="Portfolio by Asset Type")
-            st.plotly_chart(fig, use_container_width=True)
-    csv = filtered.copy(); csv["date"] = csv["date"].dt.strftime("%Y-%m-%d")
-    st.download_button("Export CSV", data=csv.to_csv(index=False).encode("utf-8"), file_name="transactions.csv", mime="text/csv")
+            tv = float(enriched["current_value"].sum()); ti = float(enriched["amount_invested"].sum())
+            tp = float(enriched["total_pnl"].sum()); tdp = float(enriched["tdy_pnl"].sum())
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Portfolio Value", format_currency(tv))
+            m2.metric("Cost Basis", format_currency(ti))
+            m3.metric("Total PnL", format_currency(tp), format_percent(safe_div(tp, ti)))
+            m4.metric("Today PnL", format_currency(tdp))
+            t1, t2, t3 = st.tabs(["Today", "Total PnL", "Prices"])
+            with t1:
+                v = enriched[["display_name", "account", "quantity", "latest_price", "previous_close", "tdy_pnl"]].copy()
+                v["latest_price"] = v["latest_price"].map(format_currency)
+                v["previous_close"] = v["previous_close"].map(format_currency)
+                v["tdy_pnl"] = v["tdy_pnl"].map(format_currency)
+                st.dataframe(v, use_container_width=True, hide_index=True)
+            with t2:
+                v = enriched[["display_name", "account", "amount_invested", "current_value", "total_pnl", "total_pnl_pct"]].copy()
+                v["amount_invested"] = v["amount_invested"].map(format_currency)
+                v["current_value"] = v["current_value"].map(format_currency)
+                v["total_pnl"] = v["total_pnl"].map(format_currency)
+                v["total_pnl_pct"] = v["total_pnl_pct"].map(format_percent)
+                st.dataframe(v, use_container_width=True, hide_index=True)
+            with t3:
+                v = enriched[["display_name", "symbol", "account", "latest_price", "price_source", "fetched_at"]].copy()
+                v["latest_price"] = v["latest_price"].map(format_currency)
+                st.dataframe(v, use_container_width=True, hide_index=True)
+            ac1, ac2 = st.columns(2)
+            with ac1:
+                ba = enriched.groupby("account", as_index=False)["current_value"].sum()
+                fig = _pie_chart(ba["account"].tolist(), ba["current_value"].tolist(), "By Account")
+                st.plotly_chart(fig, use_container_width=True)
+            with ac2:
+                bv = enriched.groupby("asset_type", as_index=False)["current_value"].sum()
+                fig = _pie_chart(bv["asset_type"].tolist(), bv["current_value"].tolist(), "By Asset Type")
+                st.plotly_chart(fig, use_container_width=True)
+            history = load_price_history()
+            if not history.empty:
+                vh = history.merge(holdings_df[["symbol", "asset_type", "quantity"]], on=["symbol", "asset_type"], how="left")
+                vh["quantity"] = vh["quantity"].fillna(0.0)
+                vh["portfolio_value"] = vh["price"] * vh["quantity"]
+                merged = vh.groupby("as_of_date", as_index=False)["portfolio_value"].sum()
+                fig = _line_chart(merged["as_of_date"].tolist(), merged["portfolio_value"].tolist(), title="Portfolio Value")
+                st.plotly_chart(fig, use_container_width=True)
+            st.download_button("Export Holdings CSV", data=enriched.to_csv(index=False).encode("utf-8"),
+                               file_name="holdings.csv", mime="text/csv")
+
+    with tab2:
+        st.subheader("Add New Holding")
+        inv_accounts = accounts_df[accounts_df["account_type"] == "investment"]
+        if inv_accounts.empty:
+            st.warning("No investment accounts found. Add one in Settings first.")
+        else:
+            inv_names = [str(x) for x in inv_accounts["name"].tolist()]
+            inv_ids = [int(x) for x in inv_accounts["id"].tolist()]
+            inv_map = dict(zip(inv_names, inv_ids))
+            with st.form("add_holding_form", clear_on_submit=True):
+                hc1, hc2 = st.columns(2)
+                h_symbol = hc1.text_input("Symbol / Name", placeholder="NVDA, BTC, SPY...")
+                h_name = hc2.text_input("Display Name", placeholder="NVIDIA (NVDA), Bitcoin (BTC)...")
+                hc3, hc4 = st.columns(2)
+                h_asset_type = hc3.selectbox("Asset Type", ["stock", "etf", "crypto", "cash"])
+                h_account = hc4.selectbox("Account", list(inv_map))
+                hc5, hc6, hc7 = st.columns(3)
+                h_amount = hc5.number_input("Amount Invested ($)", min_value=0.0, step=0.01, format="%.2f")
+                h_qty = hc6.number_input("Quantity", min_value=0.0, step=0.000001, format="%.6f")
+                h_avg = hc7.number_input("Avg Buy Price ($)", min_value=0.0, step=0.01, format="%.2f")
+                h_cg = st.text_input("CoinGecko ID (crypto only)", placeholder="bitcoin, ripple, solana...")
+                if st.form_submit_button("Add Holding", type="primary"):
+                    if not h_symbol.strip(): st.error("Symbol is required.")
+                    elif not h_name.strip(): st.error("Display name is required.")
+                    else:
+                        add_holding(h_symbol, h_name, h_asset_type, int(inv_map[h_account]),
+                                    float(h_amount), float(h_qty), float(h_avg), h_cg)
+                        st.success(f"Added {h_name}."); st.rerun()
+
+        if not holdings_df.empty:
+            st.subheader("Edit / Delete Existing Holdings")
+            holding_labels = [f"{r['display_name']} · {r['account']}" for _, r in holdings_df.iterrows()]
+            holding_ids = [int(r["id"]) for _, r in holdings_df.iterrows()]
+            label_to_hid = dict(zip(holding_labels, holding_ids))
+            selected_h = st.selectbox("Select holding", [""] + holding_labels, key="edit_holding_select")
+            if selected_h and selected_h in label_to_hid:
+                hid = label_to_hid[selected_h]
+                hrow = holdings_df[holdings_df["id"] == hid].iloc[0]
+                with st.form("edit_holding_form"):
+                    ec1, ec2, ec3 = st.columns(3)
+                    new_amount = ec1.number_input("Amount Invested ($)", value=float(hrow["amount_invested"]), step=0.01, format="%.2f")
+                    new_qty = ec2.number_input("Quantity", value=float(hrow["quantity"]), step=0.000001, format="%.6f")
+                    new_avg = ec3.number_input("Avg Buy Price ($)", value=float(hrow["avg_price"]), step=0.01, format="%.2f")
+                    col_save, col_del = st.columns(2)
+                    if col_save.form_submit_button("Update Holding", type="primary"):
+                        update_holding(hid, float(new_amount), float(new_qty), float(new_avg))
+                        st.success("Updated."); st.rerun()
+                confirm_del = st.checkbox(f"Confirm delete {hrow['display_name']}")
+                if confirm_del:
+                    if st.button("Delete Holding", type="primary"):
+                        delete_holding(hid); st.success("Deleted."); st.rerun()
+
+
+def render_reports(settings, transactions_df, holdings_df, price_cache_df, balances_df) -> None:
+    st.markdown('<div class="bb-title">Reports</div>', unsafe_allow_html=True)
+    st.markdown('<div class="bb-subtitle">Daily snapshots & analysis</div>', unsafe_allow_html=True)
+
+    tab1, tab2 = st.tabs(["Daily Snapshots", "Spending Analysis"])
+
+    with tab1:
+        daily = load_daily_reports(limit=30)
+        if not daily:
+            st.info("No daily reports yet. Reports generate automatically each morning for the previous day.")
+            st.caption("Come back tomorrow after logging today's transactions.")
+        else:
+            # Today's live preview
+            food = build_food_metrics(transactions_df, settings)
+            nw = build_net_worth(balances_df)
+            debt = build_debt_summary(balances_df)
+            runway = build_runway(transactions_df, balances_df, food)
+            enriched_h = build_enriched_holdings(holdings_df, price_cache_df) if not holdings_df.empty else pd.DataFrame()
+
+            st.markdown(f"""
+            <div class="bb-report-card" style="border-color:{C_GREEN}33">
+            <div class="bb-report-date" style="color:{C_GREEN}">
+                {date.today().strftime("%B %d, %Y")} — Live (in progress)
+            </div>
+            <div class="bb-report-row"><span>Net Worth</span><span class="bb-report-val">{format_currency(nw['net_worth'])}</span></div>
+            <div class="bb-report-row"><span>Total Debt</span><span class="bb-report-val">{format_currency(debt['total_debt'])}</span></div>
+            <div class="bb-report-row"><span>Liquid Cash</span><span class="bb-report-val">{format_currency(nw['assets'])}</span></div>
+            <div class="bb-report-row"><span>Runway</span><span class="bb-report-val">{runway['runway_days']:.1f} days</span></div>
+            <div class="bb-report-row"><span>Food Spent Today</span><span class="bb-report-val">{format_currency(food['food_spent_today'])}</span></div>
+            <div class="bb-report-row"><span>Food Surplus</span><span class="bb-report-val">{format_currency(food['current_carry_surplus'])}</span></div>
+            <div class="bb-report-row"><span>Portfolio Value</span><span class="bb-report-val">{format_currency(float(enriched_h['current_value'].sum()) if not enriched_h.empty else 0)}</span></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("---")
+
+            for snap in daily:
+                report_date_str = snap.get("report_date", "")
+                try:
+                    rd = datetime.strptime(report_date_str, DATE_FMT).strftime("%B %d, %Y")
+                except Exception:
+                    rd = report_date_str
+                accounts_html = "".join(
+                    f'<div class="bb-report-row"><span>{k}</span><span class="bb-report-val">{format_currency(v)}</span></div>'
+                    for k, v in snap.get("accounts", {}).items()
+                )
+                st.markdown(f"""
+                <div class="bb-report-card">
+                <div class="bb-report-date">{rd}</div>
+                <div class="bb-report-row"><span>Net Worth</span><span class="bb-report-val">{format_currency(snap.get('net_worth',0))}</span></div>
+                <div class="bb-report-row"><span>Total Debt</span><span class="bb-report-val">{format_currency(snap.get('debt',0))}</span></div>
+                <div class="bb-report-row"><span>Runway</span><span class="bb-report-val">{snap.get('runway_days',0):.1f} days</span></div>
+                <div class="bb-report-row"><span>Food Spent</span><span class="bb-report-val">{format_currency(snap.get('food_spent',0))}</span></div>
+                <div class="bb-report-row"><span>Food Surplus</span><span class="bb-report-val">{format_currency(snap.get('food_surplus',0))}</span></div>
+                <div class="bb-report-row"><span>Portfolio Value</span><span class="bb-report-val">{format_currency(snap.get('portfolio_value',0))}</span></div>
+                <div class="bb-report-row"><span>Portfolio PnL</span><span class="bb-report-val">{format_currency(snap.get('portfolio_pnl',0))}</span></div>
+                {accounts_html}
+                </div>""", unsafe_allow_html=True)
+
+    with tab2:
+        if transactions_df.empty:
+            st.info("Log transactions to see analysis."); return
+        tx = transactions_df.copy(); tx["date"] = pd.to_datetime(tx["date"])
+        min_d, max_d = tx["date"].min().date(), tx["date"].max().date()
+        c1, c2 = st.columns(2)
+        start_date = c1.date_input("From", value=min_d, min_value=min_d, max_value=max_d)
+        end_date = c2.date_input("To", value=max_d, min_value=min_d, max_value=max_d)
+        filtered = tx.loc[(tx["date"].dt.date >= start_date) & (tx["date"].dt.date <= end_date)].copy()
+        expense_df = filtered.loc[filtered["type"] == "Expense"].copy()
+        food_df = filtered.loc[filtered["category"] == "Food"].copy()
+        ch1, ch2 = st.columns(2)
+        with ch1:
+            if not expense_df.empty:
+                bc = expense_df.groupby("category", as_index=False)["amount"].sum()
+                fig = _pie_chart(bc["category"].tolist(), bc["amount"].tolist(), "Spending by Category")
+                st.plotly_chart(fig, use_container_width=True)
+        with ch2:
+            if not food_df.empty:
+                ft = food_df.groupby(food_df["date"].dt.date, as_index=False)["amount"].sum()
+                fig = _bar_chart(ft["date"].tolist(), ft["amount"].tolist(), color=C_GREEN,
+                                 title="Food Trend", hline=get_setting_float(settings, "daily_food_budget"))
+                st.plotly_chart(fig, use_container_width=True)
+        ch3, ch4 = st.columns(2)
+        with ch3:
+            if not expense_df.empty:
+                wb = get_setting_float(settings, "daily_food_budget") * 7
+                wg = expense_df.loc[expense_df["category"] == "Food"].copy()
+                wg["week"] = wg["date"].dt.to_period("W").astype(str)
+                fw = wg.groupby("week", as_index=False)["amount"].sum()
+                if not fw.empty:
+                    fig = go.Figure()
+                    fig.add_bar(x=fw["week"].tolist(), y=fw["amount"].tolist(), name="Food",
+                                marker_color=C_GREEN, marker_opacity=0.85)
+                    fig.add_scatter(x=fw["week"].tolist(), y=[wb] * len(fw), name="Budget", mode="lines",
+                                    line=dict(color=C_GOLD, dash="dot", width=1))
+                    _chart_theme(fig, "Food vs Weekly Budget"); st.plotly_chart(fig, use_container_width=True)
+        with ch4:
+            if not holdings_df.empty:
+                enriched = build_enriched_holdings(holdings_df, price_cache_df)
+                ba = enriched.groupby("asset_type", as_index=False)["current_value"].sum()
+                fig = _bar_chart(ba["asset_type"].tolist(), ba["current_value"].tolist(),
+                                 color=C_BLUE, title="Portfolio by Asset Type")
+                st.plotly_chart(fig, use_container_width=True)
+        csv = filtered.copy(); csv["date"] = csv["date"].dt.strftime("%Y-%m-%d")
+        st.download_button("Export CSV", data=csv.to_csv(index=False).encode("utf-8"),
+                           file_name="transactions.csv", mime="text/csv")
+
+
+def render_reconcile(transactions_df: pd.DataFrame, accounts_df: pd.DataFrame) -> None:
+    st.markdown('<div class="bb-title">Reconcile</div>', unsafe_allow_html=True)
+    st.markdown('<div class="bb-subtitle">Capital One statement verification</div>', unsafe_allow_html=True)
+
+    st.markdown("""
+    Upload a Capital One CSV statement. Black Book will compare it against your logged
+    transactions and show you exactly what matches, what's missing, and what doesn't line up.
+    **Nothing changes automatically — you review and decide.**
+    """)
+
+    # Account selector
+    cap_one_accounts = ["Checking", "Savor", "Venture"]
+    existing_accounts = [str(x) for x in accounts_df["name"].tolist()]
+    available = [a for a in cap_one_accounts if a in existing_accounts]
+    if not available:
+        st.warning("No Capital One accounts found. Add Checking, Savor, or Venture in Settings.")
+        return
+
+    c1, c2 = st.columns([1, 2])
+    selected_account = c1.selectbox("Account to reconcile", available)
+    uploaded = c2.file_uploader("Upload Capital One CSV", type=["csv"])
+
+    if uploaded is not None:
+        cap_df = parse_capital_one_csv(uploaded)
+        if cap_df.empty:
+            st.error("Could not parse the CSV. Make sure it's a Capital One export.")
+            return
+
+        st.caption(f"Parsed {len(cap_df)} transactions from statement.")
+
+        # Date range filter
+        if not cap_df.empty:
+            min_d = cap_df["date"].min(); max_d = cap_df["date"].max()
+            fc1, fc2 = st.columns(2)
+            from_date = fc1.date_input("From", value=min_d)
+            to_date = fc2.date_input("To", value=max_d)
+            cap_df = cap_df[(cap_df["date"] >= from_date) & (cap_df["date"] <= to_date)]
+
+        results = reconcile_transactions(cap_df, transactions_df, selected_account)
+
+        if results.empty:
+            st.info("No results.")
+            return
+
+        matched = len(results[results["Status"].str.startswith("✅")])
+        missing = len(results[results["Status"].str.startswith("❌")])
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total in Statement", len(results))
+        m2.metric("Matched", matched)
+        m3.metric("Missing from Log", missing)
+
+        if missing > 0:
+            st.warning(f"{missing} transaction(s) in your statement are not in Black Book. Review below and log them manually.")
+
+        st.dataframe(results, use_container_width=True, hide_index=True)
+
+        # Export reconciliation
+        st.download_button("Export Reconciliation CSV",
+                           data=results.to_csv(index=False).encode("utf-8"),
+                           file_name=f"reconcile_{selected_account}_{date.today()}.csv",
+                           mime="text/csv")
+
+
+def render_journal() -> None:
+    st.markdown('<div class="bb-title">Journal</div>', unsafe_allow_html=True)
+    st.markdown('<div class="bb-subtitle">Private dated log</div>', unsafe_allow_html=True)
+
+    tab1, tab2 = st.tabs(["Write", "Read"])
+
+    with tab1:
+        with st.form("journal_form", clear_on_submit=True):
+            jc1, jc2 = st.columns([1, 1])
+            j_date = jc1.date_input("Date", value=date.today())
+            j_tag = jc2.selectbox("Tag", JOURNAL_TAGS)
+            j_body = st.text_area("Entry", placeholder="Write anything — financial decisions, reflections, observations, goals...",
+                                  height=200)
+            if st.form_submit_button("Save Entry", type="primary"):
+                if not j_body.strip(): st.error("Entry cannot be empty.")
+                else:
+                    save_journal_entry(j_date, j_tag, j_body)
+                    st.success("Entry saved."); st.rerun()
+
+    with tab2:
+        tag_filter = st.selectbox("Filter by tag", ["All"] + JOURNAL_TAGS, key="journal_filter")
+        entries = load_journal_entries(limit=50, tag_filter=tag_filter)
+        if entries.empty:
+            st.info("No entries yet. Write your first one.")
+        else:
+            for _, row in entries.iterrows():
+                entry_id = int(row["id"])
+                try:
+                    display_date = datetime.strptime(str(row["entry_date"]), DATE_FMT).strftime("%B %d, %Y")
+                except Exception:
+                    display_date = str(row["entry_date"])
+                st.markdown(f"""
+                <div class="bb-journal-entry">
+                <div class="bb-journal-header">
+                    <span class="bb-journal-date">{display_date}</span>
+                    <span class="bb-journal-tag">{row['tag']}</span>
+                </div>
+                <div class="bb-journal-body">{str(row['body'])}</div>
+                </div>""", unsafe_allow_html=True)
+                with st.expander("", expanded=False):
+                    confirm_jdel = st.checkbox(f"Delete this entry", key=f"jdel_confirm_{entry_id}")
+                    if confirm_jdel:
+                        if st.button("Delete", key=f"jdel_btn_{entry_id}", type="primary"):
+                            delete_journal_entry(entry_id); st.rerun()
+
+
+def render_agenda() -> None:
+    st.markdown('<div class="bb-title">Agenda</div>', unsafe_allow_html=True)
+    st.markdown('<div class="bb-subtitle">Your week at a glance</div>', unsafe_allow_html=True)
+
+    # Check for Google credentials
+    has_google = all([
+        st.secrets.get("GOOGLE_CLIENT_ID", ""),
+        st.secrets.get("GOOGLE_CLIENT_SECRET", ""),
+        st.secrets.get("GOOGLE_REFRESH_TOKEN", ""),
+    ])
+
+    if not has_google:
+        st.info("Google Calendar not connected yet.")
+        with st.expander("How to connect Google Calendar"):
+            st.markdown("""
+**Step 1 — You've already done this:** OAuth credentials are in Streamlit secrets.
+
+**Step 2 — Get a refresh token by running this script once locally:**
+
+```python
+from google_auth_oauthlib.flow import InstalledAppFlow
+import json
+
+flow = InstalledAppFlow.from_client_config(
+    {
+        "installed": {
+            "client_id": "YOUR_CLIENT_ID",
+            "client_secret": "YOUR_CLIENT_SECRET",
+            "redirect_uris": ["urn:ietf:wg:oauth:2.0:oob"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    },
+    scopes=["https://www.googleapis.com/auth/calendar.readonly"]
+)
+creds = flow.run_local_server(port=0)
+print("REFRESH TOKEN:", creds.refresh_token)
+```
+
+**Step 3 — Add to Streamlit secrets:**
+```toml
+GOOGLE_REFRESH_TOKEN = "your_refresh_token_here"
+```
+
+**Step 4 — Add to requirements.txt:**
+```
+google-api-python-client
+google-auth-oauthlib
+```
+            """)
+        return
+
+    if not _GOOGLE_AVAILABLE:
+        st.warning("Google API libraries not installed. Add `google-api-python-client` and `google-auth-oauthlib` to requirements.txt")
+        return
+
+    with st.spinner("Loading calendar..."):
+        events = get_google_calendar_events()
+
+    if not events:
+        st.info("No events in the next 7 days, or calendar connection failed.")
+        return
+
+    st.subheader(f"Next 7 Days — {date.today().strftime('%B %d')} to {(date.today() + timedelta(days=7)).strftime('%B %d')}")
+
+    rows = []
+    for event in events:
+        start = event.get("start", {})
+        start_str = start.get("dateTime", start.get("date", ""))
+        try:
+            if "T" in start_str:
+                dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                date_label = dt.strftime("%a %b %d")
+                time_label = dt.strftime("%I:%M %p")
+            else:
+                dt = datetime.strptime(start_str, "%Y-%m-%d")
+                date_label = dt.strftime("%a %b %d")
+                time_label = "All day"
+        except Exception:
+            date_label = start_str[:10]
+            time_label = ""
+        rows.append({"Date": date_label, "Time": time_label, "Event": event.get("summary", "No title")})
+
+    if rows:
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 def render_settings(settings: dict[str, str], accounts_df: pd.DataFrame) -> None:
@@ -1168,43 +1814,53 @@ def render_settings(settings: dict[str, str], accounts_df: pd.DataFrame) -> None
 
     with st.form("settings_form"):
         c1, c2, c3 = st.columns(3)
-        daily_food_budget = c1.number_input("Daily Food Budget", min_value=0.0, value=get_setting_float(settings, "daily_food_budget"), step=1.0)
-        pay_period_days = c2.number_input("Pay Period Days", min_value=1, value=int(get_setting_float(settings, "pay_period_days") or 14), step=1)
-        statement_day = c3.number_input("Statement Day", min_value=1, max_value=31, value=int(get_setting_float(settings, "statement_day") or 2), step=1)
+        daily_food_budget = c1.number_input("Daily Food Budget", min_value=0.0,
+                                             value=get_setting_float(settings, "daily_food_budget"), step=1.0)
+        pay_period_days = c2.number_input("Pay Period Days", min_value=1,
+                                          value=int(get_setting_float(settings, "pay_period_days") or 14), step=1)
+        statement_day = c3.number_input("Statement Day", min_value=1, max_value=31,
+                                        value=int(get_setting_float(settings, "statement_day") or 2), step=1)
         c4, c5, c6, c7, c8 = st.columns(5)
-        due_day = c4.number_input("Due Day", min_value=1, max_value=31, value=int(get_setting_float(settings, "due_day") or 27), step=1)
-        savings_pct = c5.number_input("Savings %", min_value=0.0, max_value=1.0, value=get_setting_float(settings, "savings_pct"), step=0.01, format="%.2f")
-        spending_pct = c6.number_input("Spending %", min_value=0.0, max_value=1.0, value=get_setting_float(settings, "spending_pct"), step=0.01, format="%.2f")
-        crypto_pct = c7.number_input("Crypto %", min_value=0.0, max_value=1.0, value=get_setting_float(settings, "crypto_pct"), step=0.01, format="%.2f")
-        taxable_pct = c8.number_input("Taxable %", min_value=0.0, max_value=1.0, value=get_setting_float(settings, "taxable_investing_pct"), step=0.01, format="%.2f")
-        roth_pct = st.number_input("Roth IRA %", min_value=0.0, max_value=1.0, value=get_setting_float(settings, "roth_ira_pct"), step=0.01, format="%.2f")
+        due_day = c4.number_input("Due Day", min_value=1, max_value=31,
+                                  value=int(get_setting_float(settings, "due_day") or 27), step=1)
+        savings_pct = c5.number_input("Savings %", min_value=0.0, max_value=1.0,
+                                      value=get_setting_float(settings, "savings_pct"), step=0.01, format="%.2f")
+        spending_pct = c6.number_input("Spending %", min_value=0.0, max_value=1.0,
+                                       value=get_setting_float(settings, "spending_pct"), step=0.01, format="%.2f")
+        crypto_pct = c7.number_input("Crypto %", min_value=0.0, max_value=1.0,
+                                     value=get_setting_float(settings, "crypto_pct"), step=0.01, format="%.2f")
+        taxable_pct = c8.number_input("Taxable %", min_value=0.0, max_value=1.0,
+                                      value=get_setting_float(settings, "taxable_investing_pct"), step=0.01, format="%.2f")
+        roth_pct = st.number_input("Roth IRA %", min_value=0.0, max_value=1.0,
+                                   value=get_setting_float(settings, "roth_ira_pct"), step=0.01, format="%.2f")
         if not math.isclose(savings_pct + spending_pct + crypto_pct + taxable_pct + roth_pct, 1.0, abs_tol=0.0001):
             st.warning("Post-debt percentages should add to 1.00.")
 
         st.subheader("Account Starting Balances")
         updated_balances: dict[int, float] = {}
         cols = st.columns(2)
-        # Extract as plain Python primitives — no Arrow types whatsoever
         acct_ids   = [int(x)   for x in accounts_df["id"].tolist()]
         acct_names = [str(x)   for x in accounts_df["name"].tolist()]
         acct_bals  = [float(x) for x in accounts_df["starting_balance"].tolist()]
         acct_sorts = [int(x)   for x in accounts_df["sort_order"].tolist()]
         combined = sorted(zip(acct_sorts, acct_ids, acct_names, acct_bals), key=lambda x: x[0])
         for idx, (_, acct_id, acct_name, acct_bal) in enumerate(combined):
-            updated_balances[acct_id] = cols[idx % 2].number_input(acct_name, value=acct_bal, step=10.0, format="%.2f", key=f"bal_{idx}")
+            updated_balances[acct_id] = cols[idx % 2].number_input(
+                acct_name, value=acct_bal, step=10.0, format="%.2f", key=f"bal_{idx}")
 
         submitted = st.form_submit_button("Save Settings", type="primary")
         if submitted:
             set_settings({
                 "daily_food_budget": daily_food_budget, "pay_period_days": pay_period_days,
-                "statement_day": statement_day, "due_day": due_day,
-                "savings_pct": savings_pct, "spending_pct": spending_pct,
-                "crypto_pct": crypto_pct, "taxable_investing_pct": taxable_pct, "roth_ira_pct": roth_pct,
+                "statement_day": statement_day, "due_day": due_day, "savings_pct": savings_pct,
+                "spending_pct": spending_pct, "crypto_pct": crypto_pct,
+                "taxable_investing_pct": taxable_pct, "roth_ira_pct": roth_pct,
             })
             conn = get_connection()
             try:
                 for acct_id, balance in updated_balances.items():
-                    db_execute(conn, "UPDATE accounts SET starting_balance = %s WHERE id = %s", (float(balance), int(acct_id)))
+                    db_execute(conn, "UPDATE accounts SET starting_balance = %s WHERE id = %s",
+                               (float(balance), int(acct_id)))
                 conn.commit()
             finally:
                 conn.close()
@@ -1227,8 +1883,10 @@ def render_settings(settings: dict[str, str], accounts_df: pd.DataFrame) -> None
     st.subheader("Export Data")
     tx_df = load_transactions(); hld_df = load_holdings()
     c1, c2 = st.columns(2)
-    c1.download_button("Transactions CSV", data=tx_df.to_csv(index=False).encode("utf-8"), file_name="transactions.csv", mime="text/csv")
-    c2.download_button("Holdings CSV", data=hld_df.to_csv(index=False).encode("utf-8"), file_name="holdings.csv", mime="text/csv")
+    c1.download_button("Transactions CSV", data=tx_df.to_csv(index=False).encode("utf-8"),
+                       file_name="transactions.csv", mime="text/csv")
+    c2.download_button("Holdings CSV", data=hld_df.to_csv(index=False).encode("utf-8"),
+                       file_name="holdings.csv", mime="text/csv")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -1246,24 +1904,39 @@ def main() -> None:
     holdings_df = load_holdings()
     price_cache_df = load_price_cache()
     balances_df = build_account_balances(accounts_df, transactions_df, holdings_df, price_cache_df)
+    food_metrics = build_food_metrics(transactions_df, settings)
+
+    # Auto-generate yesterday's report
+    maybe_generate_yesterday_report(accounts_df, transactions_df, holdings_df, price_cache_df, settings)
+
+    NAV_ITEMS = [
+        "Dashboard", "Log Transaction", "Paycheck Allocation",
+        "Investments", "Reports", "Reconcile", "Journal", "Agenda", "Settings"
+    ]
 
     with st.sidebar:
         st.markdown('<div class="bb-sidebar-brand">Black Book</div>', unsafe_allow_html=True)
         st.markdown("---")
-        page = st.radio("", ["Dashboard", "Log Transaction", "Paycheck Allocation", "Investments", "Reports", "Settings"], label_visibility="collapsed")
+        page = st.radio("", NAV_ITEMS, label_visibility="collapsed")
         st.markdown("---")
         st.caption("PostgreSQL · Cloud" if IS_POSTGRES else f"SQLite · {DB_PATH}")
 
     if page == "Dashboard":
         render_dashboard(settings, transactions_df, holdings_df, balances_df, price_cache_df)
     elif page == "Log Transaction":
-        render_log_transaction(accounts_df)
+        render_log_transaction(accounts_df, transactions_df)
     elif page == "Paycheck Allocation":
-        render_paycheck_allocation(settings, balances_df)
+        render_paycheck_allocation(settings, balances_df, food_metrics)
     elif page == "Investments":
-        render_investments(holdings_df, price_cache_df)
+        render_investments(holdings_df, price_cache_df, accounts_df)
     elif page == "Reports":
-        render_reports(settings, transactions_df, holdings_df, price_cache_df)
+        render_reports(settings, transactions_df, holdings_df, price_cache_df, balances_df)
+    elif page == "Reconcile":
+        render_reconcile(transactions_df, accounts_df)
+    elif page == "Journal":
+        render_journal()
+    elif page == "Agenda":
+        render_agenda()
     elif page == "Settings":
         render_settings(settings, accounts_df)
 
