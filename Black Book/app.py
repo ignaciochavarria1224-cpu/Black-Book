@@ -1839,7 +1839,7 @@ def render_settings(settings: dict[str, str], accounts_df: pd.DataFrame) -> None
                 value=float(row["starting_balance"]),
                 step=10.0,
                 format="%.2f",
-                key=f"starting_balance_{int(row['id'])}",
+                key=f"starting_balance_{idx}",
             )
 
         submitted = st.form_submit_button("Save Settings", type="primary")
