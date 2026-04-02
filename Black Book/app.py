@@ -492,6 +492,23 @@ def load_daily_reports(limit: int = 30) -> list[dict[str, Any]]:
             pass
     return result
 
+def delete_daily_report(report_date: str) -> None:
+    conn = get_connection()
+    try:
+        db_execute(conn, "DELETE FROM daily_reports WHERE report_date = %s", (report_date,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_daily_report(report_date: str, snapshot: dict[str, Any]) -> None:
+    conn = get_connection()
+    try:
+        db_execute(conn, "UPDATE daily_reports SET snapshot_json = %s WHERE report_date = %s",
+                   (json.dumps(snapshot), report_date))
+        conn.commit()
+    finally:
+        conn.close()
 
 def report_exists(report_date: str) -> bool:
     conn = get_connection()
@@ -1511,56 +1528,116 @@ def render_reports(settings, transactions_df, holdings_df, price_cache_df, balan
 
     with tab1:
         daily = load_daily_reports(limit=30)
-        if not daily:
-            st.info("No daily reports yet. Reports generate automatically each morning for the previous day.")
-            st.caption("Come back tomorrow after logging today's transactions.")
-        else:
-            # Today's live preview
-            food = build_food_metrics(transactions_df, settings)
-            nw = build_net_worth(balances_df)
-            debt = build_debt_summary(balances_df)
-            runway = build_runway(transactions_df, balances_df, food)
-            enriched_h = build_enriched_holdings(holdings_df, price_cache_df) if not holdings_df.empty else pd.DataFrame()
 
-            st.markdown(f"""
-            <div class="bb-report-card" style="border-color:{C_GREEN}33">
+        # ── Today live card ──
+        food = build_food_metrics(transactions_df, settings)
+        nw = build_net_worth(balances_df)
+        debt = build_debt_summary(balances_df)
+        runway = build_runway(transactions_df, balances_df, food)
+        enriched_h = build_enriched_holdings(holdings_df, price_cache_df) if not holdings_df.empty else pd.DataFrame()
+        sorted_bal = balances_df.sort_values("sort_order")
+
+        acct_rows = "".join(
+            f'<div class="bb-report-row"><span>{str(r["name"])}</span>'
+            f'<span class="bb-report-val">{format_currency(float(r["display_balance"]))}</span></div>'
+            for _, r in sorted_bal.iterrows()
+        )
+        st.markdown(f"""
+        <div class="bb-report-card" style="border-color:{C_GREEN}33">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.6rem">
             <div class="bb-report-date" style="color:{C_GREEN}">
-                {date.today().strftime("%B %d, %Y")} — Live (in progress)
+                {date.today().strftime("%B %d, %Y")}
             </div>
-            <div class="bb-report-row"><span>Net Worth</span><span class="bb-report-val">{format_currency(nw['net_worth'])}</span></div>
-            <div class="bb-report-row"><span>Total Debt</span><span class="bb-report-val">{format_currency(debt['total_debt'])}</span></div>
-            <div class="bb-report-row"><span>Liquid Cash</span><span class="bb-report-val">{format_currency(nw['assets'])}</span></div>
-            <div class="bb-report-row"><span>Runway</span><span class="bb-report-val">{runway['runway_days']:.1f} days</span></div>
-            <div class="bb-report-row"><span>Food Spent Today</span><span class="bb-report-val">{format_currency(food['food_spent_today'])}</span></div>
-            <div class="bb-report-row"><span>Food Surplus</span><span class="bb-report-val">{format_currency(food['current_carry_surplus'])}</span></div>
-            <div class="bb-report-row"><span>Portfolio Value</span><span class="bb-report-val">{format_currency(float(enriched_h['current_value'].sum()) if not enriched_h.empty else 0)}</span></div>
-            </div>
-            """, unsafe_allow_html=True)
+            <div style="font-family:JetBrains Mono,monospace;font-size:0.6rem;color:{C_GREEN};
+                        letter-spacing:0.15em;text-transform:uppercase">Live · In Progress</div>
+        </div>
+        <div class="bb-report-row"><span>Net Worth</span>
+            <span class="bb-report-val">{format_currency(nw['net_worth'])}</span></div>
+        <div class="bb-report-row"><span>Total Debt</span>
+            <span class="bb-report-val">{format_currency(debt['total_debt'])}</span></div>
+        <div class="bb-report-row"><span>Liquid Cash</span>
+            <span class="bb-report-val">{format_currency(nw['assets'])}</span></div>
+        <div class="bb-report-row"><span>Runway</span>
+            <span class="bb-report-val">{runway['runway_days']:.1f} days</span></div>
+        <div class="bb-report-row"><span>Food Spent Today</span>
+            <span class="bb-report-val">{format_currency(food['food_spent_today'])}</span></div>
+        <div class="bb-report-row"><span>Food Surplus</span>
+            <span class="bb-report-val">{format_currency(food['current_carry_surplus'])}</span></div>
+        <div class="bb-report-row"><span>Portfolio Value</span>
+            <span class="bb-report-val">{format_currency(float(enriched_h['current_value'].sum()) if not enriched_h.empty else 0)}</span></div>
+        {acct_rows}
+        </div>""", unsafe_allow_html=True)
 
+        if not daily:
+            st.caption("Historical reports will appear here each morning starting tomorrow.")
+        else:
             st.markdown("---")
-
             for snap in daily:
                 report_date_str = snap.get("report_date", "")
                 try:
                     rd = datetime.strptime(report_date_str, DATE_FMT).strftime("%B %d, %Y")
                 except Exception:
                     rd = report_date_str
-                accounts_html = "".join(
-                    f'<div class="bb-report-row"><span>{k}</span><span class="bb-report-val">{format_currency(v)}</span></div>'
+
+                acct_html = "".join(
+                    f'<div class="bb-report-row"><span>{k}</span>'
+                    f'<span class="bb-report-val">{format_currency(v)}</span></div>'
                     for k, v in snap.get("accounts", {}).items()
                 )
                 st.markdown(f"""
                 <div class="bb-report-card">
-                <div class="bb-report-date">{rd}</div>
-                <div class="bb-report-row"><span>Net Worth</span><span class="bb-report-val">{format_currency(snap.get('net_worth',0))}</span></div>
-                <div class="bb-report-row"><span>Total Debt</span><span class="bb-report-val">{format_currency(snap.get('debt',0))}</span></div>
-                <div class="bb-report-row"><span>Runway</span><span class="bb-report-val">{snap.get('runway_days',0):.1f} days</span></div>
-                <div class="bb-report-row"><span>Food Spent</span><span class="bb-report-val">{format_currency(snap.get('food_spent',0))}</span></div>
-                <div class="bb-report-row"><span>Food Surplus</span><span class="bb-report-val">{format_currency(snap.get('food_surplus',0))}</span></div>
-                <div class="bb-report-row"><span>Portfolio Value</span><span class="bb-report-val">{format_currency(snap.get('portfolio_value',0))}</span></div>
-                <div class="bb-report-row"><span>Portfolio PnL</span><span class="bb-report-val">{format_currency(snap.get('portfolio_pnl',0))}</span></div>
-                {accounts_html}
+                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.6rem">
+                    <div class="bb-report-date">{rd}</div>
+                    <div style="font-family:JetBrains Mono,monospace;font-size:0.6rem;
+                                color:#374151;letter-spacing:0.15em">LOCKED</div>
+                </div>
+                <div class="bb-report-row"><span>Net Worth</span>
+                    <span class="bb-report-val">{format_currency(snap.get('net_worth',0))}</span></div>
+                <div class="bb-report-row"><span>Total Debt</span>
+                    <span class="bb-report-val">{format_currency(snap.get('debt',0))}</span></div>
+                <div class="bb-report-row"><span>Runway</span>
+                    <span class="bb-report-val">{snap.get('runway_days',0):.1f} days</span></div>
+                <div class="bb-report-row"><span>Food Spent</span>
+                    <span class="bb-report-val">{format_currency(snap.get('food_spent',0))}</span></div>
+                <div class="bb-report-row"><span>Food Surplus</span>
+                    <span class="bb-report-val">{format_currency(snap.get('food_surplus',0))}</span></div>
+                <div class="bb-report-row"><span>Portfolio Value</span>
+                    <span class="bb-report-val">{format_currency(snap.get('portfolio_value',0))}</span></div>
+                <div class="bb-report-row"><span>Portfolio PnL</span>
+                    <span class="bb-report-val">{format_currency(snap.get('portfolio_pnl',0))}</span></div>
+                {acct_html}
                 </div>""", unsafe_allow_html=True)
+
+                # Edit / Delete controls under each card
+                with st.expander(f"Edit or delete — {rd}"):
+                    edit_col, del_col = st.columns([3, 1])
+                    with edit_col:
+                        st.caption("Override any value in this snapshot:")
+                        editable = snap.copy()
+                        editable.pop("report_date", None)
+                        editable.pop("accounts", None)
+                        new_nw  = st.number_input("Net Worth",       value=float(snap.get("net_worth", 0)),      step=0.01, key=f"e_nw_{report_date_str}")
+                        new_debt = st.number_input("Total Debt",     value=float(snap.get("debt", 0)),           step=0.01, key=f"e_debt_{report_date_str}")
+                        new_port = st.number_input("Portfolio Value", value=float(snap.get("portfolio_value",0)),step=0.01, key=f"e_port_{report_date_str}")
+                        new_food = st.number_input("Food Spent",     value=float(snap.get("food_spent", 0)),     step=0.01, key=f"e_food_{report_date_str}")
+                        new_surp = st.number_input("Food Surplus",   value=float(snap.get("food_surplus", 0)),   step=0.01, key=f"e_surp_{report_date_str}")
+                        if st.button("Save Changes", key=f"save_{report_date_str}", type="primary"):
+                            updated = snap.copy()
+                            updated.update({
+                                "net_worth": new_nw, "debt": new_debt,
+                                "portfolio_value": new_port, "food_spent": new_food,
+                                "food_surplus": new_surp,
+                            })
+                            updated.pop("report_date", None)
+                            update_daily_report(report_date_str, updated)
+                            st.success("Report updated."); st.rerun()
+                    with del_col:
+                        st.caption("Delete this report permanently:")
+                        confirm_del = st.checkbox("Confirm", key=f"del_confirm_{report_date_str}")
+                        if confirm_del:
+                            if st.button("Delete", key=f"del_{report_date_str}", type="primary"):
+                                delete_daily_report(report_date_str)
+                                st.success("Deleted."); st.rerun()
 
     with tab2:
         if transactions_df.empty:
@@ -1596,7 +1673,7 @@ def render_reports(settings, transactions_df, holdings_df, price_cache_df, balan
                     fig = go.Figure()
                     fig.add_bar(x=fw["week"].tolist(), y=fw["amount"].tolist(), name="Food",
                                 marker_color=C_GREEN, marker_opacity=0.85)
-                    fig.add_scatter(x=fw["week"].tolist(), y=[wb] * len(fw), name="Budget", mode="lines",
+                    fig.add_scatter(x=fw["week"].tolist(), y=[wb]*len(fw), name="Budget", mode="lines",
                                     line=dict(color=C_GOLD, dash="dot", width=1))
                     _chart_theme(fig, "Food vs Weekly Budget"); st.plotly_chart(fig, use_container_width=True)
         with ch4:
@@ -1723,90 +1800,61 @@ def render_journal() -> None:
 
 def render_agenda() -> None:
     st.markdown('<div class="bb-title">Agenda</div>', unsafe_allow_html=True)
-    st.markdown('<div class="bb-subtitle">Your week at a glance</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="bb-subtitle">Week of {date.today().strftime("%B %d, %Y")}</div>',
+                unsafe_allow_html=True)
 
-    # Check for Google credentials
     has_google = all([
         st.secrets.get("GOOGLE_CLIENT_ID", ""),
         st.secrets.get("GOOGLE_CLIENT_SECRET", ""),
         st.secrets.get("GOOGLE_REFRESH_TOKEN", ""),
     ])
 
-    if not has_google:
-        st.info("Google Calendar not connected yet.")
-        with st.expander("How to connect Google Calendar"):
-            st.markdown("""
-**Step 1 — You've already done this:** OAuth credentials are in Streamlit secrets.
-
-**Step 2 — Get a refresh token by running this script once locally:**
-
-```python
-from google_auth_oauthlib.flow import InstalledAppFlow
-import json
-
-flow = InstalledAppFlow.from_client_config(
-    {
-        "installed": {
-            "client_id": "YOUR_CLIENT_ID",
-            "client_secret": "YOUR_CLIENT_SECRET",
-            "redirect_uris": ["urn:ietf:wg:oauth:2.0:oob"],
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-        }
-    },
-    scopes=["https://www.googleapis.com/auth/calendar.readonly"]
-)
-creds = flow.run_local_server(port=0)
-print("REFRESH TOKEN:", creds.refresh_token)
-```
-
-**Step 3 — Add to Streamlit secrets:**
-```toml
-GOOGLE_REFRESH_TOKEN = "your_refresh_token_here"
-```
-
-**Step 4 — Add to requirements.txt:**
-```
-google-api-python-client
-google-auth-oauthlib
-```
-            """)
+    if not has_google or not _GOOGLE_AVAILABLE:
+        st.info("Google Calendar not connected.")
         return
 
-    if not _GOOGLE_AVAILABLE:
-        st.warning("Google API libraries not installed. Add `google-api-python-client` and `google-auth-oauthlib` to requirements.txt")
-        return
-
-    with st.spinner("Loading calendar..."):
+    with st.spinner("Loading..."):
         events = get_google_calendar_events()
 
     if not events:
-        st.info("No events in the next 7 days, or calendar connection failed.")
+        st.info("No events in the next 7 days.")
         return
 
-    st.subheader(f"Next 7 Days — {date.today().strftime('%B %d')} to {(date.today() + timedelta(days=7)).strftime('%B %d')}")
-
-    rows = []
+    from collections import defaultdict
+    days: dict[str, list[dict]] = defaultdict(list)
     for event in events:
         start = event.get("start", {})
         start_str = start.get("dateTime", start.get("date", ""))
         try:
             if "T" in start_str:
                 dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
-                date_label = dt.strftime("%a %b %d")
+                day_key = dt.strftime("%A, %B %d")
                 time_label = dt.strftime("%I:%M %p")
             else:
                 dt = datetime.strptime(start_str, "%Y-%m-%d")
-                date_label = dt.strftime("%a %b %d")
+                day_key = dt.strftime("%A, %B %d")
                 time_label = "All day"
         except Exception:
-            date_label = start_str[:10]
+            day_key = start_str[:10]
             time_label = ""
-        rows.append({"Date": date_label, "Time": time_label, "Event": event.get("summary", "No title")})
+        days[day_key].append({"time": time_label, "title": event.get("summary", "No title")})
 
-    if rows:
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
+    for day, evts in days.items():
+        st.markdown(f"""
+        <div style="margin-bottom:0.2rem;margin-top:1rem;
+                    font-family:JetBrains Mono,monospace;font-size:0.65rem;
+                    letter-spacing:0.18em;text-transform:uppercase;color:#374151">
+            {day}
+        </div>""", unsafe_allow_html=True)
+        for evt in evts:
+            st.markdown(f"""
+            <div style="display:flex;gap:1.5rem;align-items:baseline;
+                        background:#0d1117;border:1px solid rgba(255,255,255,0.04);
+                        border-radius:2px;padding:0.55rem 0.8rem;margin-bottom:0.3rem">
+                <span style="font-family:JetBrains Mono,monospace;font-size:0.7rem;
+                              color:#374151;min-width:70px">{evt['time']}</span>
+                <span style="font-size:0.85rem;color:#e2e8f0">{evt['title']}</span>
+            </div>""", unsafe_allow_html=True)
 
 def render_settings(settings: dict[str, str], accounts_df: pd.DataFrame) -> None:
     st.markdown('<div class="bb-title">Settings</div>', unsafe_allow_html=True)
