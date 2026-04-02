@@ -280,17 +280,14 @@ def inject_css() -> None:
     )
 
 
-import streamlit as st
-import psycopg2
-from psycopg2.extras import RealDictCursor
-
-@st.cache_resource(show_spinner="Connecting to database...")
-def get_connection():
-    return psycopg2.connect(
-        st.secrets["DATABASE_URL"],
-        cursor_factory=RealDictCursor,
-        sslmode="require"          # ← This is important for Supabase
-    )
+def get_connection():  # returns sqlite3.Connection or psycopg2 connection
+    if IS_POSTGRES:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+        conn.autocommit = False
+        return conn
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def db_execute(conn, sql: str, params: tuple = ()) -> Any:
@@ -1888,3 +1885,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    
