@@ -1454,39 +1454,18 @@ def render_dashboard(
 
     with left:
         st.subheader("Accounts")
-        rows_html = """
-        <div class="term-accounts">
-            <div class="term-acct-header">
-                <span>Account</span><span>Balance</span><span>Type</span>
-            </div>
-        """
-        for _, row in balances_df.sort_values("sort_order").iterrows():
-            bal = float(row["display_balance"])
-            bal_class = "neg" if bal < 0 else ""
-            debt_class = "term-acct-debt" if row["is_debt"] else ""
-            acct_type = "Debt" if row["is_debt"] else row["account_type"].title()
-            rows_html += f"""
-            <div class="term-acct-row {debt_class}">
-                <span class="term-acct-name">{row["name"]}</span>
-                <span class="term-acct-bal {bal_class}">{format_currency(bal)}</span>
-                <span class="term-acct-type">{acct_type}</span>
-            </div>
-            """
-        rows_html += "</div>"
-        st.markdown(rows_html, unsafe_allow_html=True)
-
-        st.subheader("Recent Money Moves")
-        recent = transactions_df.head(8).copy() if not transactions_df.empty else pd.DataFrame()
-        if recent.empty:
-            st.info("No transactions logged yet.")
-        else:
-            recent["date"] = pd.to_datetime(recent["date"]).dt.strftime("%Y-%m-%d")
-            recent["amount"] = recent["amount"].map(format_currency)
-            st.dataframe(
-                recent[["date", "description", "category", "amount", "account", "type", "to_account"]],
-                use_container_width=True,
-                hide_index=True,
-            )
+        acct_names = [str(x) for x in balances_df.sort_values("sort_order")["name"].tolist()]
+        acct_bals  = [float(x) for x in balances_df.sort_values("sort_order")["display_balance"].tolist()]
+        acct_types = [
+            "Debt" if int(r["is_debt"]) else str(r["account_type"]).title()
+            for _, r in balances_df.sort_values("sort_order").iterrows()
+        ]
+        acct_display = pd.DataFrame({
+            "Account": acct_names,
+            "Balance": [format_currency(b) for b in acct_bals],
+            "Type": acct_types,
+        })
+        st.dataframe(acct_display, use_container_width=True, hide_index=True)
 
     with right:
         reports = prepare_report_frames(transactions_df)
@@ -1808,6 +1787,22 @@ def render_reports(settings: dict[str, str], transactions_df: pd.DataFrame, hold
     csv["date"] = csv["date"].dt.strftime("%Y-%m-%d")
     st.download_button("Export Transactions CSV", data=csv.to_csv(index=False).encode("utf-8"), file_name="budget_black_book_transactions.csv", mime="text/csv")
 
+def add_account(name: str, account_type: str, is_debt: int, include_in_runway: int) -> None:
+    conn = get_connection()
+    try:
+        sort_order = db_execute(conn, "SELECT COUNT(*) AS count FROM accounts").fetchone()["count"] + 1
+        db_execute(
+            conn,
+            """
+            INSERT INTO accounts (name, account_type, is_debt, include_in_runway, starting_balance, sort_order)
+            VALUES (%s, %s, %s, %s, 0.0, %s)
+            ON CONFLICT(name) DO NOTHING
+            """,
+            (name, account_type, is_debt, include_in_runway, sort_order),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 def render_settings(settings: dict[str, str], accounts_df: pd.DataFrame) -> None:
     st.title("Settings")
@@ -1832,39 +1827,45 @@ def render_settings(settings: dict[str, str], accounts_df: pd.DataFrame) -> None
         st.subheader("Account Starting Balances")
         updated_balances = {}
         cols = st.columns(2)
-        accounts_sorted = accounts_df.sort_values("sort_order").reset_index(drop=True)
-        for idx, (_, row) in enumerate(accounts_sorted.iterrows()):
-            acct_name = str(row["name"])
-            updated_balances[row["id"]] = cols[idx % 2].number_input(
+
+        # Pull values out as plain Python lists to avoid Arrow type issues
+        acct_ids   = [int(x) for x in accounts_df["id"].tolist()]
+        acct_names = [str(x) for x in accounts_df["name"].tolist()]
+        acct_bals  = [float(x) for x in accounts_df["starting_balance"].tolist()]
+        acct_sorts = [int(x) for x in accounts_df["sort_order"].tolist()]
+
+        # Sort by sort_order
+        combined = sorted(zip(acct_sorts, acct_ids, acct_names, acct_bals), key=lambda x: x[0])
+
+        for idx, (_, acct_id, acct_name, acct_bal) in enumerate(combined):
+            updated_balances[acct_id] = cols[idx % 2].number_input(
                 acct_name,
-                value=float(row["starting_balance"]),
+                value=acct_bal,
                 step=10.0,
                 format="%.2f",
-                key=f"starting_balance_{idx}",
+                key=f"bal_{idx}",
             )
 
         submitted = st.form_submit_button("Save Settings", type="primary")
         if submitted:
-            set_settings(
-                {
-                    "daily_food_budget": daily_food_budget,
-                    "pay_period_days": pay_period_days,
-                    "statement_day": statement_day,
-                    "due_day": due_day,
-                    "savings_pct": savings_pct,
-                    "spending_pct": spending_pct,
-                    "crypto_pct": crypto_pct,
-                    "taxable_investing_pct": taxable_pct,
-                    "roth_ira_pct": roth_pct,
-                }
-            )
+            set_settings({
+                "daily_food_budget": daily_food_budget,
+                "pay_period_days": pay_period_days,
+                "statement_day": statement_day,
+                "due_day": due_day,
+                "savings_pct": savings_pct,
+                "spending_pct": spending_pct,
+                "crypto_pct": crypto_pct,
+                "taxable_investing_pct": taxable_pct,
+                "roth_ira_pct": roth_pct,
+            })
             conn = get_connection()
             try:
-                for account_id, balance in updated_balances.items():
+                for acct_id, balance in updated_balances.items():
                     db_execute(
                         conn,
                         "UPDATE accounts SET starting_balance = %s WHERE id = %s",
-                        (float(balance), int(account_id)),
+                        (float(balance), int(acct_id)),
                     )
                 conn.commit()
             finally:
@@ -1872,9 +1873,28 @@ def render_settings(settings: dict[str, str], accounts_df: pd.DataFrame) -> None
             st.success("Settings saved.")
             st.rerun()
 
+    # ── Add New Account ───────────────────────────────────────────
+    st.subheader("Add New Account")
+    with st.form("add_account_form"):
+        a1, a2 = st.columns(2)
+        new_name = a1.text_input("Account Name", placeholder="e.g. Chase Checking")
+        new_type = a2.selectbox("Account Type", ["cash", "savings", "credit", "investment"])
+        a3, a4 = st.columns(2)
+        new_is_debt = 1 if a3.selectbox("Is this a debt account?", ["No", "Yes"]) == "Yes" else 0
+        new_runway = 1 if a4.selectbox("Include in runway calculation?", ["Yes", "No"]) == "Yes" else 0
+        add_submitted = st.form_submit_button("Add Account", type="primary")
+        if add_submitted:
+            if not new_name.strip():
+                st.error("Account name is required.")
+            else:
+                add_account(new_name.strip(), new_type, new_is_debt, new_runway)
+                st.success(f"Account '{new_name}' added.")
+                st.rerun()
+
+    # ── Export ────────────────────────────────────────────────────
     st.subheader("Export")
     tx_df = load_transactions()
-    holdings_df = load_holdings()
+    hld_df = load_holdings()
     st.download_button(
         "Export Transactions CSV",
         data=tx_df.to_csv(index=False).encode("utf-8"),
@@ -1883,7 +1903,7 @@ def render_settings(settings: dict[str, str], accounts_df: pd.DataFrame) -> None
     )
     st.download_button(
         "Export Holdings CSV",
-        data=holdings_df.to_csv(index=False).encode("utf-8"),
+        data=hld_df.to_csv(index=False).encode("utf-8"),
         file_name="budget_black_book_holdings.csv",
         mime="text/csv",
     )
