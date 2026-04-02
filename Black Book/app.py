@@ -1834,8 +1834,9 @@ def render_settings(settings: dict[str, str], accounts_df: pd.DataFrame) -> None
         cols = st.columns(2)
         accounts_sorted = accounts_df.sort_values("sort_order").reset_index(drop=True)
         for idx, (_, row) in enumerate(accounts_sorted.iterrows()):
+            acct_name = str(row["name"])
             updated_balances[row["id"]] = cols[idx % 2].number_input(
-                f"{row['name']}",
+                acct_name,
                 value=float(row["starting_balance"]),
                 step=10.0,
                 format="%.2f",
