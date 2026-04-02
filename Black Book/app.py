@@ -279,24 +279,19 @@ def inject_css() -> None:
         unsafe_allow_html=True,
     )
 
+
 def get_connection():
-    DATABASE_URL = st.secrets.get("DATABASE_URL") or os.environ.get("DATABASE_URL")
-    
-    if not DATABASE_URL:
+    url = st.secrets.get("DATABASE_URL") or os.environ.get("DATABASE_URL")
+    if not url:
         st.error("DATABASE_URL is not configured.")
         st.stop()
-
-    # Embed sslmode in the URL — don't pass it as a separate kwarg
-    if "sslmode" not in DATABASE_URL:
-        DATABASE_URL += "?sslmode=require"
-
-    conn = psycopg2.connect(
-        DATABASE_URL,
-        cursor_factory=psycopg2.extras.RealDictCursor
-        # ← removed sslmode="require" from here
-    )
+    # Embed sslmode in the URL to avoid kwarg conflict with psycopg2
+    if "sslmode" not in url:
+        url += "?sslmode=require"
+    conn = psycopg2.connect(url, cursor_factory=psycopg2.extras.RealDictCursor)
     return conn
-    
+
+
 def db_execute(conn, sql: str, params: tuple = ()) -> Any:
     """Execute a single parameterized statement on either SQLite or PostgreSQL.
 
@@ -310,6 +305,11 @@ def db_execute(conn, sql: str, params: tuple = ()) -> Any:
     # SQLite expects ? placeholders.
     sqlite_sql = re.sub(r"%s", "?", sql)
     return conn.execute(sqlite_sql, params)
+
+
+def _to_float_series(s: pd.Series) -> pd.Series:
+    """Safely coerce any pandas Series to float, handling Arrow-backed types from Postgres."""
+    return pd.to_numeric(s, errors="coerce").fillna(0.0).astype(float)
 
 
 def init_db() -> None:
@@ -483,7 +483,7 @@ def set_settings(settings: dict[str, Any]) -> None:
 def load_accounts() -> pd.DataFrame:
     conn = get_connection()
     try:
-        return pd.read_sql_query(
+        df = pd.read_sql_query(
             """
             SELECT id, name, account_type, is_debt, include_in_runway, starting_balance, sort_order
             FROM accounts
@@ -493,6 +493,11 @@ def load_accounts() -> pd.DataFrame:
         )
     finally:
         conn.close()
+    # Coerce numeric columns — Postgres + newer pandas can return Arrow-backed types
+    for col in ("id", "is_debt", "include_in_runway", "sort_order"):
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+    df["starting_balance"] = _to_float_series(df["starting_balance"])
+    return df
 
 
 def add_transaction(
@@ -559,13 +564,16 @@ def load_transactions() -> pd.DataFrame:
     if df.empty:
         return df
     df["date"] = pd.to_datetime(df["date"]).dt.date
+    df["amount"] = _to_float_series(df["amount"])
+    df["account_id"] = pd.to_numeric(df["account_id"], errors="coerce").fillna(0).astype(int)
+    df["to_account_id"] = pd.to_numeric(df["to_account_id"], errors="coerce")  # keep NaN for nulls
     return df
 
 
 def load_holdings() -> pd.DataFrame:
     conn = get_connection()
     try:
-        return pd.read_sql_query(
+        df = pd.read_sql_query(
             """
             SELECT
                 h.id,
@@ -586,6 +594,12 @@ def load_holdings() -> pd.DataFrame:
         )
     finally:
         conn.close()
+    if df.empty:
+        return df
+    for col in ("amount_invested", "quantity", "avg_price"):
+        df[col] = _to_float_series(df[col])
+    df["account_id"] = pd.to_numeric(df["account_id"], errors="coerce").fillna(0).astype(int)
+    return df
 
 
 def save_allocation_snapshot(payload: dict[str, Any]) -> None:
@@ -623,7 +637,7 @@ def save_allocation_snapshot(payload: dict[str, Any]) -> None:
 def load_allocation_snapshots(limit: int = 10) -> pd.DataFrame:
     conn = get_connection()
     try:
-        return pd.read_sql_query(
+        df = pd.read_sql_query(
             """
             SELECT *
             FROM allocation_snapshots
@@ -640,6 +654,14 @@ def load_allocation_snapshots(limit: int = 10) -> pd.DataFrame:
         )
     finally:
         conn.close()
+    if df.empty:
+        return df
+    for col in ("paycheck_amount", "debt_total", "food_reserved", "debt_reserved",
+                "savings_reserved", "spending_reserved", "crypto_reserved",
+                "taxable_reserved", "roth_reserved"):
+        if col in df.columns:
+            df[col] = _to_float_series(df[col])
+    return df
 
 
 def upsert_price(symbol: str, asset_type: str, price: float, previous_close: float | None, source: str, as_of_date: str) -> None:
@@ -680,20 +702,30 @@ def upsert_price(symbol: str, asset_type: str, price: float, previous_close: flo
 def load_price_cache() -> pd.DataFrame:
     conn = get_connection()
     try:
-        return pd.read_sql_query("SELECT * FROM price_cache", conn)
+        df = pd.read_sql_query("SELECT * FROM price_cache", conn)
     finally:
         conn.close()
+    if df.empty:
+        return df
+    df["price"] = _to_float_series(df["price"])
+    df["previous_close"] = _to_float_series(df["previous_close"])
+    return df
 
 
 def load_price_history() -> pd.DataFrame:
     conn = get_connection()
     try:
-        return pd.read_sql_query(
+        df = pd.read_sql_query(
             "SELECT symbol, asset_type, price, previous_close, as_of_date FROM price_history ORDER BY as_of_date",
             conn,
         )
     finally:
         conn.close()
+    if df.empty:
+        return df
+    df["price"] = _to_float_series(df["price"])
+    df["previous_close"] = _to_float_series(df["previous_close"])
+    return df
 
 
 def excel_serial_to_date(value: Any) -> date | None:
@@ -953,6 +985,10 @@ def build_enriched_holdings(holdings_df: pd.DataFrame, price_cache_df: pd.DataFr
         return holdings_df
 
     enriched = holdings_df.copy()
+    # Ensure numeric types are clean before any arithmetic
+    for col in ("amount_invested", "quantity", "avg_price"):
+        enriched[col] = _to_float_series(enriched[col])
+
     price_map = {}
     if not price_cache_df.empty:
         price_map = {
@@ -981,29 +1017,30 @@ def build_enriched_holdings(holdings_df: pd.DataFrame, price_cache_df: pd.DataFr
     enriched["previous_close"] = previous_close
     enriched["price_source"] = price_source
     enriched["fetched_at"] = fetched_at
-    enriched["current_value"] = enriched["quantity"].astype(float) * enriched["latest_price"].astype(float)
-    enriched["current_value"] = enriched["current_value"].where(enriched["quantity"].astype(float) > 0, enriched["amount_invested"].astype(float))
-    enriched["total_pnl"] = enriched["current_value"] - enriched["amount_invested"].astype(float)
+    enriched["current_value"] = enriched["quantity"] * enriched["latest_price"]
+    enriched["current_value"] = enriched["current_value"].where(enriched["quantity"] > 0, enriched["amount_invested"])
+    enriched["total_pnl"] = enriched["current_value"] - enriched["amount_invested"]
     enriched["total_pnl_pct"] = enriched.apply(
         lambda row: safe_div(row["total_pnl"], row["amount_invested"]) if row["amount_invested"] else 0.0,
         axis=1,
     )
-    enriched["tdy_pnl"] = (enriched["latest_price"] - enriched["previous_close"]) * enriched["quantity"].astype(float)
+    enriched["tdy_pnl"] = (enriched["latest_price"] - enriched["previous_close"]) * enriched["quantity"]
     return enriched
 
 
 def build_account_balances(accounts_df: pd.DataFrame, transactions_df: pd.DataFrame, holdings_df: pd.DataFrame, price_cache_df: pd.DataFrame) -> pd.DataFrame:
     balances = accounts_df.copy()
-    balances["current_balance"] = balances["starting_balance"].astype(float)
+    # Use _to_float_series so Arrow-backed Postgres types don't crash
+    balances["current_balance"] = _to_float_series(balances["starting_balance"])
 
     if transactions_df.empty:
         tx_df = pd.DataFrame(columns=["account_id", "to_account_id", "type", "amount"])
     else:
         tx_df = transactions_df.copy()
-        tx_df["amount"] = tx_df["amount"].astype(float)
+        tx_df["amount"] = _to_float_series(tx_df["amount"])
 
     debt_ids = set(balances.loc[balances["is_debt"] == 1, "id"].astype(int))
-    current_balances = {int(row["id"]): float(row["starting_balance"]) for _, row in balances.iterrows()}
+    current_balances = {int(row["id"]): coerce_float(row["starting_balance"]) for _, row in balances.iterrows()}
 
     for _, tx in tx_df.sort_values(by=["date", "id"]).iterrows():
         account_id = int(tx["account_id"])
@@ -1127,7 +1164,7 @@ def build_runway(transactions_df: pd.DataFrame, balances_df: pd.DataFrame, food_
 
 def build_debt_summary(balances_df: pd.DataFrame) -> dict[str, Any]:
     debt_df = balances_df.loc[balances_df["is_debt"] == 1, ["id", "name", "display_balance"]].copy()
-    debt_df["display_balance"] = debt_df["display_balance"].astype(float)
+    debt_df["display_balance"] = _to_float_series(debt_df["display_balance"])
     debt_df["display_balance"] = debt_df["display_balance"].clip(lower=0)
     return {
         "total_debt": float(debt_df["display_balance"].sum()),
@@ -1372,7 +1409,6 @@ def prepare_report_frames(transactions_df: pd.DataFrame) -> dict[str, pd.DataFra
 
 def render_signal(signal: Signal) -> None:
     level_class = f"term-signal-{signal.level}"
-    # Strip leading emoji from title for cleaner terminal look
     title_text = signal.title.split(" ", 1)[-1] if signal.title[0] in "⚠📅🧾💸🛣🍽💰💳" else signal.title
     st.markdown(
         f"""
