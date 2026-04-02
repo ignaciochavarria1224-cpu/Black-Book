@@ -279,17 +279,21 @@ def inject_css() -> None:
         unsafe_allow_html=True,
     )
 
-
-def get_connection():  # returns sqlite3.Connection or psycopg2 connection
-    if IS_POSTGRES:
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor, sslmode="require")
-        conn.autocommit = False
-        return conn
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
+def get_connection():
+    # Try Streamlit secrets first, fall back to env variable
+    DATABASE_URL = st.secrets.get("DATABASE_URL") or os.environ.get("DATABASE_URL")
+    
+    if not DATABASE_URL:
+        st.error("DATABASE_URL is not configured.")
+        st.stop()
+    
+    conn = psycopg2.connect(
+        DATABASE_URL,
+        cursor_factory=psycopg2.extras.RealDictCursor,
+        sslmode="require"
+    )
     return conn
-
-
+    
 def db_execute(conn, sql: str, params: tuple = ()) -> Any:
     """Execute a single parameterized statement on either SQLite or PostgreSQL.
 
