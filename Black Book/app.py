@@ -1832,13 +1832,14 @@ def render_settings(settings: dict[str, str], accounts_df: pd.DataFrame) -> None
         st.subheader("Account Starting Balances")
         updated_balances = {}
         cols = st.columns(2)
-        for idx, (_, row) in enumerate(accounts_df.sort_values("sort_order").iterrows()):
+        accounts_sorted = accounts_df.sort_values("sort_order").reset_index(drop=True)
+        for idx, (_, row) in enumerate(accounts_sorted.iterrows()):
             updated_balances[row["id"]] = cols[idx % 2].number_input(
                 f"{row['name']}",
                 value=float(row["starting_balance"]),
                 step=10.0,
                 format="%.2f",
-                key=f"starting_balance_{row['id']}",
+                key=f"starting_balance_{int(row['id'])}",
             )
 
         submitted = st.form_submit_button("Save Settings", type="primary")
