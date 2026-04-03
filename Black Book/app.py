@@ -1255,22 +1255,43 @@ def ask_advisor(question: str, context: str, conversation_history: list) -> str:
 
     client = GroqClient(api_key=api_key)
 
-    system_prompt = f"""You are the Black Book Advisor — a private, highly personal financial and life advisor for Ignacio Chavarria, an 18-year-old finance major at Florida State University with Uruguayan roots. His parents are entrepreneurs who founded an architecture firm in miami. He is deeply focused on investing, portfolio management, wealth building, and personal growth.
+    # Load context file and memory file from repo if available
+    context_file = ""
+    memory_file = ""
+    try:
+        ctx_path = Path("context.md")
+        if ctx_path.exists():
+            context_file = ctx_path.read_text(encoding="utf-8")
+    except Exception:
+        pass
+    try:
+        mem_path = Path("advisor_memory.md")
+        if mem_path.exists():
+            memory_file = mem_path.read_text(encoding="utf-8")
+    except Exception:
+        pass
 
-You have complete access to his real financial data, transaction history, investment portfolio, and personal journal entries. You know his actual numbers. Never give generic advice — always speak directly to his specific situation.
+    system_prompt = f"""You are the Black Book Advisor — a private, intelligent system built specifically for Ignacio. You are not a generic assistant. You exist inside his personal operating system and have access to his real financial data, his journals, his history, and his thinking. You know him.
 
-Your personality: Direct, intelligent, no fluff. You respect his autonomy and intelligence. You point out patterns he might not see. You connect his emotional journal entries to his financial behavior when relevant. You think long term.
+PERMANENT CONTEXT (who he is, his laws, his goals, his systems):
+{context_file if context_file else "context.md not found in repo."}
 
-Here is his complete current data:
+CONVERSATION MEMORY (key points from past sessions):
+{memory_file if memory_file else "No memory log yet."}
 
+LIVE FINANCIAL DATA (current as of today):
 {context}
 
-Important rules:
-- Always reference his actual numbers, not hypotheticals
-- If you notice something concerning or interesting in the data, say it unprompted
-- Keep responses focused and concise
-- If he asks something outside your data, be honest about what you don't know
-- Never be preachy or lecture him"""
+HOW TO RESPOND:
+- Maximum 3 paragraphs. Each one earns its place — the thought before justifies the thought after.
+- Dense, layered thinking. Not simple, not complex for complexity's sake.
+- Direct but not cold. Peer-to-peer, not advisor-to-client.
+- Plain language unless the topic demands otherwise.
+- Reference his actual numbers, his laws, his goals when relevant.
+- When something is unclear or unfamiliar, ask before assuming.
+- Never soften what needs to be said. He named his own weaknesses — he can handle directness.
+- Never use bullet points in responses. Write in paragraphs.
+- Do not pad with affirmations or filler. Start with the point."""
 
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(conversation_history[-10:])  # Last 10 exchanges for context
@@ -1286,7 +1307,49 @@ Important rules:
         return response.choices[0].message.content
     except Exception as e:
         return f"Error: {str(e)}"
-              
+
+def save_advisor_memory(conversation_history: list) -> None:
+    """Extract and append key points from conversation to advisor_memory.md"""
+    if not _GROQ_AVAILABLE or len(conversation_history) < 2:
+        return
+
+    api_key = st.secrets.get("GROQ_API_KEY", "") or os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        return
+
+    try:
+        client = GroqClient(api_key=api_key)
+        # Build summary of conversation
+        convo_text = "\n".join(
+            f"{m['role'].upper()}: {m['content']}"
+            for m in conversation_history[-10:]
+        )
+        summary_prompt = f"""Extract the key points from this conversation that are worth remembering long term.
+Focus on: new goals mentioned, decisions made, patterns identified, action items, anything Ignacio said about his life or systems that is not already captured in his journals or financial data.
+Be extremely concise. Write in third person. Date each entry with today's date: {date.today().strftime('%B %d, %Y')}.
+Format as short paragraphs, not bullet points.
+If nothing new or significant was discussed, respond with exactly: NOTHING_TO_SAVE
+
+CONVERSATION:
+{convo_text}"""
+
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": summary_prompt}],
+            max_tokens=300,
+            temperature=0.3,
+        )
+        summary = response.choices[0].message.content.strip()
+
+        if summary and summary != "NOTHING_TO_SAVE":
+            mem_path = Path("advisor_memory.md")
+            existing = mem_path.read_text(encoding="utf-8") if mem_path.exists() else "# Advisor Memory Log\n\n<!-- NEW ENTRIES APPENDED BELOW THIS LINE -->\n"
+            new_entry = f"\n\n**{date.today().strftime('%B %d, %Y')}**\n{summary}"
+            updated = existing + new_entry
+            mem_path.write_text(updated, encoding="utf-8")
+    except Exception:
+        pass
+
 # ── Render helpers ────────────────────────────────────────────────────────────
 
 def render_signal(signal: Signal) -> None:
