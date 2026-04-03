@@ -1759,12 +1759,39 @@ def render_journal() -> None:
     tab1, tab2 = st.tabs(["Write", "Read"])
 
     with tab1:
+        # ── Daily prompts
+        st.markdown(f"""
+        <div style="background:#0d1117;border:1px solid rgba(255,255,255,0.05);
+                    border-radius:2px;padding:1rem 1.2rem;margin-bottom:1.2rem">
+            <div style="font-family:JetBrains Mono,monospace;font-size:0.6rem;
+                        letter-spacing:0.2em;text-transform:uppercase;
+                        color:#374151;margin-bottom:0.8rem">Daily Prompts</div>
+            <div style="font-family:JetBrains Mono,monospace;font-size:0.72rem;
+                        color:#6b7280;line-height:2.2">
+                <span style="color:#374151">STATE &nbsp;&nbsp;</span>
+                1. How am I actually feeling today — physically and mentally?<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                2. What is the dominant emotion or energy I am carrying right now?<br>
+                <span style="color:#374151">MONEY &nbsp;&nbsp;</span>
+                3. Did I make any financial decisions today? What was the reasoning?<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                4. Is there any financial stress or clarity I am feeling right now?<br>
+                <span style="color:#374151">MIND &nbsp;&nbsp;&nbsp;</span>
+                5. What is the most significant thought I had today?<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                6. Did I act in alignment with who I want to be today? Where did I fall short?<br>
+                <span style="color:#374151">PATTERN</span>
+                7. What do I want to remember about today?
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
         with st.form("journal_form", clear_on_submit=True):
             jc1, jc2 = st.columns([1, 1])
             j_date = jc1.date_input("Date", value=date.today())
             j_tag = jc2.selectbox("Tag", JOURNAL_TAGS)
-            j_body = st.text_area("Entry", placeholder="Write anything — financial decisions, reflections, observations, goals...",
-                                  height=200)
+            j_body = st.text_area("Entry", placeholder="1. ...\n2. ...\n3. ...\n4. ...\n5. ...\n6. ...\n7. ...",
+                                  height=220)
             if st.form_submit_button("Save Entry", type="primary"):
                 if not j_body.strip(): st.error("Entry cannot be empty.")
                 else:
