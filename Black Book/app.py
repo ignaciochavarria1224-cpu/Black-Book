@@ -1956,12 +1956,57 @@ def render_settings(settings: dict[str, str], accounts_df: pd.DataFrame) -> None
                 st.success(f"'{new_name}' added."); st.rerun()
 
     st.subheader("Export Data")
-    tx_df = load_transactions(); hld_df = load_holdings()
+
+    tx_df = load_transactions()
+    hld_df = load_holdings()
+    journal_df = load_journal_entries(limit=10000)
+    daily = load_daily_reports(limit=365)
+    alloc = load_allocation_snapshots(limit=100)
+    settings_current = get_settings()
+
+    # ── Individual CSVs
     c1, c2 = st.columns(2)
-    c1.download_button("Transactions CSV", data=tx_df.to_csv(index=False).encode("utf-8"),
+    c1.download_button("Transactions CSV",
+                       data=tx_df.to_csv(index=False).encode("utf-8"),
                        file_name="transactions.csv", mime="text/csv")
-    c2.download_button("Holdings CSV", data=hld_df.to_csv(index=False).encode("utf-8"),
+    c2.download_button("Holdings CSV",
+                       data=hld_df.to_csv(index=False).encode("utf-8"),
                        file_name="holdings.csv", mime="text/csv")
+
+    # ── Full Black Book export
+    st.markdown("---")
+    st.caption("Full export — use this to feed the AI layer when ready.")
+
+    full_export = {
+        "exported_at": datetime.now().isoformat(),
+        "settings": settings_current,
+        "accounts": load_accounts().to_dict("records"),
+        "transactions": [
+            {k: str(v) if isinstance(v, date) else v
+             for k, v in row.items()}
+            for row in tx_df.to_dict("records")
+        ],
+        "holdings": hld_df.to_dict("records"),
+        "journal_entries": [
+            {"date": str(r["entry_date"]), "tag": str(r["tag"]), "body": str(r["body"])}
+            for _, r in journal_df.iterrows()
+        ] if not journal_df.empty else [],
+        "daily_reports": daily,
+        "allocation_snapshots": alloc.to_dict("records") if not alloc.empty else [],
+    }
+
+    export_json = json.dumps(full_export, indent=2, default=str)
+
+    st.download_button(
+        "⬇ Full Black Book Export (JSON)",
+        data=export_json.encode("utf-8"),
+        file_name=f"blackbook_export_{date.today().strftime('%Y%m%d')}.json",
+        mime="application/json",
+        type="primary",
+        use_container_width=True,
+    )
+
+    st.caption(f"Includes {len(tx_df)} transactions · {len(journal_df) if not journal_df.empty else 0} journal entries · {len(daily)} daily reports · {len(hld_df)} holdings")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
