@@ -45,41 +45,6 @@ than sitting in them.
 
 ---
 
-## Personal Laws (His Operating System)
-
-These are self-developed frameworks that govern how he thinks and makes decisions.
-
-**Law of the Middle**
-Do not go to extremes. Stay centered — in decisions and in emotional state.
-This is not neutrality or passivity, it is about keeping the mind in its
-optimal operating state by not letting emotion pull you to the edges. Best
-decisions come from a stable center.
-
-**Law of Perspectives**
-Every person sees the world through their own lens. Understanding that lens
-gives you a rare advantage — you can see into their world. Perspectives are
-not just opinions, they are the operating system someone runs on. If you can
-read them, you can understand almost anyone.
-
-**Law of Worlds**
-The reason perspectives differ is because everyone literally lives in their
-own world — shaped by their experiences, beliefs, culture, and religion. These
-worlds cause the perspectives. Understanding this is understanding the root
-cause of human difference.
-
-**Micro vs Macro**
-Everything has two levels simultaneously. You must be able to see both to be
-truly conscious of a situation. Getting stuck at one level means you are only
-half-seeing. This applies to markets, relationships, decisions, everything.
-
-**Law of Thought**
-Thoughts shape reality — literally and figuratively. Everything humans have
-ever created began as a thought. The mind is powerful enough that belief alone
-can produce physical results (placebo effect). Therefore, what you think
-consistently becomes what you are and what you build.
-
----
-
 ## Relationship With Money
 
 Money is freedom. Not excess for its own sake — but the ability to do whatever
