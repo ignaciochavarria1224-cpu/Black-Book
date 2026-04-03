@@ -29,6 +29,12 @@ except ImportError:
     _PSYCOPG2_AVAILABLE = False
 
 try:
+    from groq import Groq as GroqClient
+    _GROQ_AVAILABLE = True
+except ImportError:
+    _GROQ_AVAILABLE = False
+
+try:
     from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build as google_build
     _GOOGLE_AVAILABLE = True
@@ -1158,7 +1164,129 @@ def reconcile_transactions(cap_one_df: pd.DataFrame, logged_df: pd.DataFrame,
             })
     return pd.DataFrame(results)
 
+def build_advisor_context(transactions_df, balances_df, holdings_df,
+                           price_cache_df, settings, food_metrics) -> str:
+    """Build the financial context string sent to the LLM."""
+    today = date.today().strftime("%B %d, %Y")
+    nw = build_net_worth(balances_df)
+    debt = build_debt_summary(balances_df)
+    runway = build_runway(transactions_df, balances_df, food_metrics)
+    enriched_h = build_enriched_holdings(holdings_df, price_cache_df) if not holdings_df.empty else pd.DataFrame()
 
+    # Account balances
+    sorted_bal = balances_df.sort_values("sort_order")
+    accounts_str = "\n".join(
+        f"  {str(r['name'])}: {format_currency(float(r['display_balance']))} ({('DEBT' if int(r['is_debt']) else str(r['account_type']).upper())})"
+        for _, r in sorted_bal.iterrows()
+    )
+
+    # Recent transactions
+    if not transactions_df.empty:
+        recent_tx = transactions_df.head(20).copy()
+        tx_lines = "\n".join(
+            f"  {str(r['date'])} · {str(r['description'])} · {format_currency(float(r['amount']))} · {str(r['account'])} · {str(r['type'])}"
+            for _, r in recent_tx.iterrows()
+        )
+    else:
+        tx_lines = "  No transactions logged yet."
+
+    # Portfolio
+    if not enriched_h.empty:
+        portfolio_str = "\n".join(
+            f"  {str(r['display_name'])}: {format_currency(float(r['current_value']))} (PnL: {format_currency(float(r['total_pnl']))})"
+            for _, r in enriched_h.iterrows()
+        )
+        portfolio_total = format_currency(float(enriched_h["current_value"].sum()))
+    else:
+        portfolio_str = "  No holdings yet."
+        portfolio_total = "$0.00"
+
+    # Recent journal entries
+    journal_df = load_journal_entries(limit=5)
+    if not journal_df.empty:
+        journal_str = "\n\n".join(
+            f"  [{str(r['entry_date'])} · {str(r['tag'])}]\n  {str(r['body'])[:500]}"
+            for _, r in journal_df.iterrows()
+        )
+    else:
+        journal_str = "  No journal entries yet."
+
+    context = f"""Today is {today}.
+
+FINANCIAL SNAPSHOT
+==================
+Net Worth: {format_currency(nw['net_worth'])}
+Total Assets: {format_currency(nw['assets'])}
+Total Debt: {format_currency(debt['total_debt'])}
+Runway: {runway['runway_days']:.1f} days
+Avg Daily Spend: {format_currency(runway['avg_daily_spending'])}/day
+Portfolio Value: {portfolio_total}
+Food Budget: {format_currency(get_setting_float(settings, 'daily_food_budget'))}/day
+Food Surplus (carry): {format_currency(food_metrics['current_carry_surplus'])}
+Pay Period: {int(get_setting_float(settings, 'pay_period_days'))} days
+
+ACCOUNTS
+========
+{accounts_str}
+
+PORTFOLIO
+=========
+{portfolio_str}
+
+RECENT TRANSACTIONS (last 20)
+==============================
+{tx_lines}
+
+RECENT JOURNAL ENTRIES (last 5)
+================================
+{journal_str}"""
+
+    return context
+
+
+def ask_advisor(question: str, context: str, conversation_history: list) -> str:
+    """Send question to Groq with full context and conversation history."""
+    if not _GROQ_AVAILABLE:
+        return "Groq library not installed. Add `groq` to requirements.txt."
+
+    api_key = st.secrets.get("GROQ_API_KEY", "") or os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        return "GROQ_API_KEY not found in secrets."
+
+    client = GroqClient(api_key=api_key)
+
+    system_prompt = f"""You are the Black Book Advisor — a private, highly personal financial and life advisor for Ignacio Chavarria, an 18-year-old finance major at Florida State University with Uruguayan roots. His parents are entrepreneurs who founded an architecture firm in miami. He is deeply focused on investing, portfolio management, wealth building, and personal growth.
+
+You have complete access to his real financial data, transaction history, investment portfolio, and personal journal entries. You know his actual numbers. Never give generic advice — always speak directly to his specific situation.
+
+Your personality: Direct, intelligent, no fluff. You respect his autonomy and intelligence. You point out patterns he might not see. You connect his emotional journal entries to his financial behavior when relevant. You think long term.
+
+Here is his complete current data:
+
+{context}
+
+Important rules:
+- Always reference his actual numbers, not hypotheticals
+- If you notice something concerning or interesting in the data, say it unprompted
+- Keep responses focused and concise
+- If he asks something outside your data, be honest about what you don't know
+- Never be preachy or lecture him"""
+
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(conversation_history[-10:])  # Last 10 exchanges for context
+    messages.append({"role": "user", "content": question})
+
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            max_tokens=1024,
+            temperature=0.7,
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error: {str(e)}"
+              
 # ── Render helpers ────────────────────────────────────────────────────────────
 
 def render_signal(signal: Signal) -> None:
@@ -2008,7 +2136,106 @@ def render_settings(settings: dict[str, str], accounts_df: pd.DataFrame) -> None
 
     st.caption(f"Includes {len(tx_df)} transactions · {len(journal_df) if not journal_df.empty else 0} journal entries · {len(daily)} daily reports · {len(hld_df)} holdings")
 
+def render_advisor(transactions_df, balances_df, holdings_df,
+                   price_cache_df, settings, food_metrics) -> None:
+    st.markdown('<div class="bb-title">Advisor</div>', unsafe_allow_html=True)
+    st.markdown('<div class="bb-subtitle">Your private financial advisor</div>',
+                unsafe_allow_html=True)
 
+    if not _GROQ_AVAILABLE:
+        st.error("Add `groq` to requirements.txt and redeploy.")
+        return
+
+    api_key = st.secrets.get("GROQ_API_KEY", "")
+    if not api_key:
+        st.error("Add GROQ_API_KEY to Streamlit secrets.")
+        return
+
+    # Initialize conversation history in session state
+    if "advisor_history" not in st.session_state:
+        st.session_state.advisor_history = []
+    if "advisor_context" not in st.session_state:
+        st.session_state.advisor_context = ""
+
+    # Build context once per session
+    if not st.session_state.advisor_context:
+        with st.spinner("Loading your data..."):
+            st.session_state.advisor_context = build_advisor_context(
+                transactions_df, balances_df, holdings_df,
+                price_cache_df, settings, food_metrics
+            )
+
+    # Controls row
+    c1, c2, c3 = st.columns([2, 1, 1])
+    with c2:
+        if st.button("Refresh Data", use_container_width=True):
+            st.session_state.advisor_context = build_advisor_context(
+                transactions_df, balances_df, holdings_df,
+                price_cache_df, settings, food_metrics
+            )
+            st.success("Data refreshed.")
+    with c3:
+        if st.button("Clear Chat", use_container_width=True):
+            st.session_state.advisor_history = []
+            st.rerun()
+
+    # Suggested prompts
+    if not st.session_state.advisor_history:
+        st.markdown("""
+        <div style="margin-bottom:1rem">
+        <div style="font-family:JetBrains Mono,monospace;font-size:0.6rem;
+                    letter-spacing:0.2em;text-transform:uppercase;
+                    color:#374151;margin-bottom:0.6rem">Suggested</div>
+        </div>""", unsafe_allow_html=True)
+
+        suggestions = [
+            "Give me an honest assessment of my current financial position.",
+            "What patterns do you notice in my spending and journal entries?",
+            "Based on my numbers, what should my next paycheck allocation look like?",
+            "What's my biggest financial risk right now?",
+        ]
+        cols = st.columns(2)
+        for i, s in enumerate(suggestions):
+            if cols[i % 2].button(s, key=f"suggestion_{i}", use_container_width=True):
+                with st.spinner("Thinking..."):
+                    response = ask_advisor(s, st.session_state.advisor_context,
+                                          st.session_state.advisor_history)
+                st.session_state.advisor_history.append({"role": "user", "content": s})
+                st.session_state.advisor_history.append({"role": "assistant", "content": response})
+                st.rerun()
+
+    # Conversation display
+    for msg in st.session_state.advisor_history:
+        if msg["role"] == "user":
+            st.markdown(f"""
+            <div style="display:flex;justify-content:flex-end;margin-bottom:0.6rem">
+            <div style="background:#1a1f2e;border:1px solid rgba(255,255,255,0.06);
+                        border-radius:2px;padding:0.6rem 0.9rem;max-width:75%;
+                        font-size:0.85rem;color:#e2e8f0">{msg['content']}</div>
+            </div>""", unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div style="display:flex;justify-content:flex-start;margin-bottom:0.6rem">
+            <div style="background:#0d1117;border:1px solid rgba(0,200,150,0.15);
+                        border-left:2px solid {C_GREEN};
+                        border-radius:2px;padding:0.6rem 0.9rem;max-width:85%;
+                        font-size:0.85rem;color:#9ca3af;line-height:1.6">{msg['content']}</div>
+            </div>""", unsafe_allow_html=True)
+
+    # Input
+    st.markdown("<div style='margin-top:1rem'></div>", unsafe_allow_html=True)
+    with st.form("advisor_form", clear_on_submit=True):
+        fc1, fc2 = st.columns([5, 1])
+        question = fc1.text_input("", placeholder="Ask anything about your finances, spending, investments, or journal patterns...",
+                                   label_visibility="collapsed")
+        submitted = fc2.form_submit_button("Send", type="primary", use_container_width=True)
+        if submitted and question.strip():
+            with st.spinner("Thinking..."):
+                response = ask_advisor(question.strip(), st.session_state.advisor_context,
+                                       st.session_state.advisor_history)
+            st.session_state.advisor_history.append({"role": "user", "content": question.strip()})
+            st.session_state.advisor_history.append({"role": "assistant", "content": response})
+            st.rerun()
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -2030,9 +2257,9 @@ def main() -> None:
     maybe_generate_yesterday_report(accounts_df, transactions_df, holdings_df, price_cache_df, settings)
 
     NAV_ITEMS = [
-        "Dashboard", "Log Transaction", "Paycheck Allocation",
-        "Investments", "Reports", "Reconcile", "Journal", "Agenda", "Settings"
-    ]
+    "Dashboard", "Log Transaction", "Paycheck Allocation",
+    "Investments", "Reports", "Reconcile", "Journal", "Agenda", "Advisor", "Settings"
+]
 
     with st.sidebar:
         st.markdown('<div class="bb-sidebar-brand">Black Book</div>', unsafe_allow_html=True)
@@ -2057,6 +2284,9 @@ def main() -> None:
         render_journal()
     elif page == "Agenda":
         render_agenda()
+    elif page == "Advisor":
+        render_advisor(transactions_df, balances_df, holdings_df,
+                       price_cache_df, settings, food_metrics)
     elif page == "Settings":
         render_settings(settings, accounts_df)
 
