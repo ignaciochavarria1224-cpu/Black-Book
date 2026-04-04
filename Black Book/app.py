@@ -111,53 +111,335 @@ class Signal:
 def inject_css() -> None:
     st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=JetBrains+Mono:wght@400;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+    /* ── Palette: Old Money meets New Age ── */
+    :root {
+        --gold: #C9A84C;
+        --gold-dim: rgba(201,168,76,0.12);
+        --gold-border: rgba(201,168,76,0.2);
+        --cream: #F2EDE4;
+        --cream-dim: #9A9080;
+        --bg-deep: #080810;
+        --bg-card: #0D0D18;
+        --bg-elevated: #121220;
+        --border: rgba(255,255,255,0.05);
+        --green: #00c896;
+        --red: #ff4d4d;
+        --gold-accent: #f0a500;
+    }
+
     .main > div { padding-top: 0.5rem; }
-    section[data-testid="stSidebar"] { background: #060810; border-right: 1px solid rgba(255,255,255,0.04); }
-    .bb-title { font-family: 'Playfair Display', serif; font-size: 2.4rem; font-weight: 900;
-                letter-spacing: 0.05em; color: #f0f0f0; line-height: 1; margin-bottom: 0; }
-    .bb-subtitle { font-family: 'JetBrains Mono', monospace; font-size: 0.62rem; letter-spacing: 0.25em;
-                   color: #374151; text-transform: uppercase; margin-bottom: 1.2rem;
-                   border-bottom: 1px solid rgba(255,255,255,0.04); padding-bottom: 0.8rem; }
-    h2, h3 { font-family: 'JetBrains Mono', monospace !important; font-size: 0.65rem !important;
-             font-weight: 600 !important; letter-spacing: 0.18em !important; text-transform: uppercase !important;
-             color: #374151 !important; margin-top: 1.5rem !important; margin-bottom: 0.5rem !important; }
-    [data-testid="stMetric"] { background: #0d1117; border: 1px solid rgba(255,255,255,0.05);
-                                border-radius: 2px; padding: 0.9rem 1rem 0.7rem 1rem; position: relative; }
-    [data-testid="stMetric"]::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
-                                        background: linear-gradient(90deg, transparent, rgba(0,200,150,0.3), transparent); }
-    [data-testid="stMetricLabel"] p { font-family: 'JetBrains Mono', monospace !important; font-size: 0.6rem !important;
-                                       text-transform: uppercase; letter-spacing: 0.15em; color: #374151 !important; }
-    [data-testid="stMetricValue"] { font-family: 'JetBrains Mono', monospace !important;
-                                     font-size: 1.2rem !important; color: #e2e8f0 !important; }
-    [data-testid="stMetricDelta"] { font-family: 'JetBrains Mono', monospace !important; font-size: 0.72rem !important; }
-    [data-testid="stDataFrame"] { border: 1px solid rgba(255,255,255,0.05) !important; border-radius: 2px !important; }
-    [data-testid="baseButton-primary"] { border-radius: 2px !important; letter-spacing: 0.1em;
-                                          font-family: 'JetBrains Mono', monospace !important;
-                                          font-size: 0.72rem !important; text-transform: uppercase; }
-    [data-testid="stRadio"] label { font-family: 'JetBrains Mono', monospace !important;
-                                     font-size: 0.72rem !important; letter-spacing: 0.08em; }
-    .bb-sidebar-brand { font-family: 'Playfair Display', serif; font-size: 1rem;
-                         font-weight: 700; color: #374151; letter-spacing: 0.05em; }
-    .bb-report-card { background: #0d1117; border: 1px solid rgba(255,255,255,0.05);
-                       border-radius: 2px; padding: 1rem; margin-bottom: 0.75rem; }
-    .bb-report-date { font-family: 'Playfair Display', serif; font-size: 1rem;
-                       color: #e2e8f0; margin-bottom: 0.5rem; }
-    .bb-report-row { display: flex; justify-content: space-between;
-                      font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;
-                      color: #6b7280; padding: 0.15rem 0; border-bottom: 1px solid rgba(255,255,255,0.02); }
-    .bb-report-val { color: #e2e8f0; }
-    .bb-journal-entry { background: #0d1117; border: 1px solid rgba(255,255,255,0.05);
-                         border-radius: 2px; padding: 1rem; margin-bottom: 0.75rem; }
+
+    /* ── Sidebar ── */
+    section[data-testid="stSidebar"] {
+        background: #07070F;
+        border-right: 1px solid var(--gold-border);
+    }
+    section[data-testid="stSidebar"] > div {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        padding-bottom: 1rem;
+    }
+
+    /* ── Sidebar brand ── */
+    .bb-sidebar-brand {
+        font-family: 'Playfair Display', serif;
+        font-size: 1.6rem;
+        font-weight: 900;
+        color: var(--gold);
+        letter-spacing: 0.04em;
+        line-height: 1.1;
+        padding: 0.2rem 0 0.1rem 0;
+    }
+    .bb-sidebar-year {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.55rem;
+        letter-spacing: 0.3em;
+        color: rgba(201,168,76,0.35);
+        text-transform: uppercase;
+        margin-top: 0.15rem;
+        margin-bottom: 0.8rem;
+    }
+
+    /* ── Sidebar nav ── */
+    [data-testid="stRadio"] > div { gap: 0 !important; }
+    [data-testid="stRadio"] label {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.68rem !important;
+        letter-spacing: 0.1em !important;
+        color: var(--cream-dim) !important;
+        padding: 0.45rem 0.6rem !important;
+        border-radius: 0 !important;
+        border-left: 1px solid transparent !important;
+        transition: all 0.15s ease !important;
+        text-transform: uppercase !important;
+    }
+    [data-testid="stRadio"] label:hover {
+        color: var(--cream) !important;
+        border-left-color: var(--gold-border) !important;
+        background: var(--gold-dim) !important;
+    }
+    [data-testid="stRadio"] label[data-selected="true"],
+    [data-testid="stRadio"] label[aria-checked="true"] {
+        color: var(--gold) !important;
+        border-left: 1px solid var(--gold) !important;
+        background: var(--gold-dim) !important;
+    }
+
+    /* ── Sidebar bottom label ── */
+    .bb-sidebar-footer {
+        margin-top: auto;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.55rem;
+        letter-spacing: 0.15em;
+        color: rgba(201,168,76,0.25);
+        text-transform: uppercase;
+        padding-top: 1rem;
+        border-top: 1px solid var(--gold-border);
+    }
+
+    /* ── Page titles ── */
+    .bb-title {
+        font-family: 'Playfair Display', serif;
+        font-size: 2.4rem;
+        font-weight: 900;
+        letter-spacing: 0.03em;
+        color: var(--cream);
+        line-height: 1;
+        margin-bottom: 0;
+    }
+    .bb-subtitle {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.58rem;
+        letter-spacing: 0.28em;
+        color: rgba(201,168,76,0.3);
+        text-transform: uppercase;
+        margin-bottom: 1.2rem;
+        border-bottom: 1px solid var(--gold-border);
+        padding-bottom: 0.8rem;
+    }
+
+    /* ── Section headers ── */
+    h2, h3 {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.6rem !important;
+        font-weight: 500 !important;
+        letter-spacing: 0.22em !important;
+        text-transform: uppercase !important;
+        color: rgba(201,168,76,0.4) !important;
+        margin-top: 1.5rem !important;
+        margin-bottom: 0.5rem !important;
+    }
+
+    /* ── Metrics ── */
+    [data-testid="stMetric"] {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-top: 1px solid var(--gold-border);
+        border-radius: 0;
+        padding: 0.9rem 1rem 0.7rem 1rem;
+        position: relative;
+    }
+    [data-testid="stMetricLabel"] p {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.58rem !important;
+        text-transform: uppercase;
+        letter-spacing: 0.15em;
+        color: var(--cream-dim) !important;
+    }
+    [data-testid="stMetricValue"] {
+        font-family: 'Playfair Display', serif !important;
+        font-size: 1.3rem !important;
+        color: var(--cream) !important;
+    }
+    [data-testid="stMetricDelta"] {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.68rem !important;
+    }
+
+    /* ── DataFrames ── */
+    [data-testid="stDataFrame"] {
+        border: 1px solid var(--gold-border) !important;
+        border-radius: 0 !important;
+    }
+
+    /* ── Buttons ── */
+    [data-testid="baseButton-primary"] {
+        background: var(--gold) !important;
+        color: #080810 !important;
+        border: none !important;
+        border-radius: 0 !important;
+        letter-spacing: 0.12em;
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.68rem !important;
+        font-weight: 600 !important;
+        text-transform: uppercase;
+    }
+    [data-testid="baseButton-primary"]:hover {
+        background: #D4B55A !important;
+    }
+    [data-testid="baseButton-secondary"] {
+        background: transparent !important;
+        color: var(--cream-dim) !important;
+        border: 1px solid rgba(255,255,255,0.08) !important;
+        border-radius: 0 !important;
+        letter-spacing: 0.1em;
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.65rem !important;
+        text-transform: uppercase;
+        transition: all 0.15s ease !important;
+    }
+    [data-testid="baseButton-secondary"]:hover {
+        border-color: var(--gold-border) !important;
+        color: var(--cream) !important;
+    }
+
+    /* ── Cards ── */
+    .bb-report-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-top: 1px solid var(--gold-border);
+        border-radius: 0;
+        padding: 1rem;
+        margin-bottom: 0.75rem;
+    }
+    .bb-report-date {
+        font-family: 'Playfair Display', serif;
+        font-size: 1rem;
+        color: var(--cream);
+        margin-bottom: 0.5rem;
+    }
+    .bb-report-row {
+        display: flex;
+        justify-content: space-between;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.7rem;
+        color: var(--cream-dim);
+        padding: 0.15rem 0;
+        border-bottom: 1px solid rgba(255,255,255,0.02);
+    }
+    .bb-report-val { color: var(--cream); }
+
+    /* ── Journal ── */
+    .bb-journal-entry {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-left: 2px solid var(--gold-border);
+        border-radius: 0;
+        padding: 1rem;
+        margin-bottom: 0.75rem;
+    }
     .bb-journal-header { display: flex; justify-content: space-between; margin-bottom: 0.5rem; }
-    .bb-journal-date { font-family: 'JetBrains Mono', monospace; font-size: 0.65rem;
-                        letter-spacing: 0.1em; color: #374151; }
-    .bb-journal-tag { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem;
-                       letter-spacing: 0.1em; color: #00c896; text-transform: uppercase; }
-    .bb-journal-body { font-size: 0.85rem; color: #9ca3af; line-height: 1.6; white-space: pre-wrap; }
-    .bb-memory-entry { background: #0d1117; border: 1px solid rgba(255,255,255,0.04);
-                        border-left: 2px solid #374151; border-radius: 2px;
-                        padding: 0.7rem 0.9rem; margin-bottom: 0.5rem; }
+    .bb-journal-date {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.62rem;
+        letter-spacing: 0.1em;
+        color: var(--cream-dim);
+    }
+    .bb-journal-tag {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.58rem;
+        letter-spacing: 0.12em;
+        color: var(--gold);
+        text-transform: uppercase;
+    }
+    .bb-journal-body {
+        font-size: 0.85rem;
+        color: #9ca3af;
+        line-height: 1.7;
+        white-space: pre-wrap;
+    }
+
+    /* ── Memory entries ── */
+    .bb-memory-entry {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-left: 2px solid rgba(201,168,76,0.25);
+        border-radius: 0;
+        padding: 0.7rem 0.9rem;
+        margin-bottom: 0.5rem;
+    }
+
+    /* ── Advisor chat ── */
+    .bb-advisor-controls {
+        display: flex;
+        gap: 0.5rem;
+        justify-content: flex-end;
+        margin-bottom: 1.5rem;
+    }
+    .bb-advisor-btn {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.62rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        padding: 0.45rem 1rem;
+        border: 1px solid rgba(255,255,255,0.08);
+        background: transparent;
+        color: var(--cream-dim);
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+    .bb-advisor-btn:hover { border-color: var(--gold-border); color: var(--cream); }
+    .bb-advisor-btn.save { border-color: var(--gold-border); color: var(--gold); }
+
+    /* ── Strip code block green styling from advisor responses ── */
+    .bb-response code, .bb-response pre {
+        background: transparent !important;
+        color: inherit !important;
+        font-family: inherit !important;
+        font-size: inherit !important;
+        border: none !important;
+        padding: 0 !important;
+    }
+
+    /* ── Inputs ── */
+    .stTextArea textarea {
+        background: var(--bg-card) !important;
+        border: 1px solid var(--gold-border) !important;
+        border-radius: 0 !important;
+        color: var(--cream) !important;
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.85rem !important;
+        resize: none !important;
+    }
+    .stTextArea textarea:focus {
+        border-color: var(--gold) !important;
+        box-shadow: none !important;
+    }
+    .stTextInput input {
+        background: var(--bg-card) !important;
+        border: 1px solid var(--gold-border) !important;
+        border-radius: 0 !important;
+        color: var(--cream) !important;
+    }
+
+    /* ── Tabs ── */
+    [data-testid="stTabs"] [role="tablist"] {
+        border-bottom: 1px solid var(--gold-border) !important;
+        gap: 0 !important;
+    }
+    [data-testid="stTabs"] button[role="tab"] {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.62rem !important;
+        letter-spacing: 0.15em !important;
+        text-transform: uppercase !important;
+        color: var(--cream-dim) !important;
+        border-radius: 0 !important;
+        border-bottom: 1px solid transparent !important;
+        padding: 0.5rem 1.2rem !important;
+        background: transparent !important;
+    }
+    [data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+        color: var(--gold) !important;
+        border-bottom: 1px solid var(--gold) !important;
+        background: transparent !important;
+    }
+
+    /* ── Dividers ── */
+    hr { border-color: var(--gold-border) !important; }
+
     </style>
     """, unsafe_allow_html=True)
 
@@ -1794,21 +2076,22 @@ def render_advisor(transactions_df, balances_df, holdings_df, price_cache_df, se
             st.session_state.advisor_context = build_advisor_context(
                 transactions_df, balances_df, holdings_df, price_cache_df, settings, food_metrics)
 
-    # Controls
-    c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
-    with c2:
-        if st.button("Refresh Data", use_container_width=True):
+   # Controls
+    ctrl1, ctrl2, ctrl3 = st.columns([1, 1, 1])
+    with ctrl1:
+        if st.button("↻  Refresh Data", use_container_width=True):
             st.session_state.advisor_context = build_advisor_context(
                 transactions_df, balances_df, holdings_df, price_cache_df, settings, food_metrics)
             st.success("Data refreshed.")
-    with c3:
-        if st.button("Save Memory", use_container_width=True):
+    with ctrl2:
+        if st.button("◈  Save Memory", use_container_width=True):
             with st.spinner("Extracting key points..."):
                 msg = extract_and_save_memory(st.session_state.advisor_history)
             st.success(msg)
-    with c4:
-        if st.button("Clear Chat", use_container_width=True):
+    with ctrl3:
+        if st.button("✕  Clear Chat", use_container_width=True):
             st.session_state.advisor_history = []; st.rerun()
+    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
 
     # Suggested prompts on empty state
     if not st.session_state.advisor_history:
@@ -1831,16 +2114,31 @@ def render_advisor(transactions_df, balances_df, holdings_df, price_cache_df, se
     # Conversation
     for msg in st.session_state.advisor_history:
         if msg["role"] == "user":
-            st.markdown(f'<div style="display:flex;justify-content:flex-end;margin-bottom:0.6rem"><div style="background:#1a1f2e;border:1px solid rgba(255,255,255,0.06);border-radius:2px;padding:0.6rem 0.9rem;max-width:75%;font-size:0.85rem;color:#e2e8f0">{msg["content"]}</div></div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div style="display:flex;justify-content:flex-end;margin-bottom:0.8rem">'
+                f'<div style="background:#14141F;border:1px solid rgba(201,168,76,0.1);'
+                f'padding:0.7rem 1rem;max-width:72%;font-size:0.85rem;color:#F2EDE4;line-height:1.6">'
+                f'{msg["content"]}</div></div>',
+                unsafe_allow_html=True)
         else:
-            st.markdown(f'<div style="display:flex;justify-content:flex-start;margin-bottom:0.6rem"><div style="background:#0d1117;border:1px solid rgba(0,200,150,0.15);border-left:2px solid {C_GREEN};border-radius:2px;padding:0.6rem 0.9rem;max-width:85%;font-size:0.85rem;color:#9ca3af;line-height:1.6">{msg["content"]}</div></div>', unsafe_allow_html=True)
+            # Strip backtick formatting so it doesn't render as green code blocks
+            clean = re.sub(r'```[^`]*```', lambda m: m.group().strip('`').split('\n', 1)[-1].strip(), msg["content"], flags=re.DOTALL)
+            clean = re.sub(r'`([^`]+)`', r'\1', clean)
+            st.markdown(
+                f'<div style="display:flex;justify-content:flex-start;margin-bottom:0.8rem">'
+                f'<div class="bb-response" style="background:#0D0D18;border:1px solid rgba(255,255,255,0.04);'
+                f'border-left:2px solid #C9A84C;'
+                f'padding:0.8rem 1.1rem;max-width:88%;font-size:0.88rem;color:#9A9080;line-height:1.75">'
+                f'{clean}</div></div>',
+                unsafe_allow_html=True)
 
     # Input
-    st.markdown("<div style='margin-top:1rem'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-top:1.5rem'></div>", unsafe_allow_html=True)
     with st.form("advisor_form", clear_on_submit=True):
-        fc1, fc2 = st.columns([5, 1])
-        question = fc1.text_input("", placeholder="Ask anything...", label_visibility="collapsed")
-        submitted = fc2.form_submit_button("Send", type="primary", use_container_width=True)
+        question = st.text_area(
+            "", placeholder="Ask anything...",
+            label_visibility="collapsed", height=110)
+        submitted = st.form_submit_button("Send", type="primary", use_container_width=True)
         if submitted and question.strip():
             with st.spinner("Thinking..."):
                 response = ask_advisor(question.strip(), st.session_state.advisor_context, st.session_state.advisor_history)
@@ -1962,10 +2260,11 @@ def main() -> None:
 
     with st.sidebar:
         st.markdown('<div class="bb-sidebar-brand">Black Book</div>', unsafe_allow_html=True)
-        st.markdown("---")
+        st.markdown('<div class="bb-sidebar-year">Est. 2025 · Personal OS</div>', unsafe_allow_html=True)
         page = st.radio("", NAV_ITEMS, label_visibility="collapsed")
-        st.markdown("---")
-        st.caption("PostgreSQL · Cloud" if IS_POSTGRES else f"SQLite · {DB_PATH}")
+        st.markdown(
+            f'<div class="bb-sidebar-footer">{"PostgreSQL · Cloud" if IS_POSTGRES else f"SQLite · Local"}</div>',
+            unsafe_allow_html=True)
 
     if page == "Dashboard":
         render_dashboard(settings, transactions_df, holdings_df, balances_df, price_cache_df)
