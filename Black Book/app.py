@@ -28,10 +28,10 @@ except ImportError:
     _PSYCOPG2_AVAILABLE = False
 
 try:
-    from groq import Groq as GroqClient
-    _GROQ_AVAILABLE = True
+    import google.generativeai as genai
+    _GENAI_AVAILABLE = True
 except ImportError:
-    _GROQ_AVAILABLE = False
+    _GENAI_AVAILABLE = False
 
 try:
     from google.oauth2.credentials import Credentials
@@ -1477,12 +1477,14 @@ RECENT JOURNAL ENTRIES (last 5)
 
 
 def ask_advisor(question: str, context: str, conversation_history: list) -> str:
-    if not _GROQ_AVAILABLE: return "Groq library not installed."
-    api_key = st.secrets.get("GROQ_API_KEY", "") or os.environ.get("GROQ_API_KEY", "")
-    if not api_key: return "GROQ_API_KEY not found in secrets."
-    client = GroqClient(api_key=api_key)
+    if not _GENAI_AVAILABLE:
+        return "google-generativeai not installed. Add it to requirements.txt."
+    api_key = st.secrets.get("GOOGLE_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")
+    if not api_key:
+        return "GOOGLE_API_KEY not found in secrets."
 
-    # Load context.md from repo (read-only filesystem — reads work fine)
+    genai.configure(api_key=api_key)
+
     context_file = ""
     try:
         for ctx_candidate in [
@@ -1496,10 +1498,9 @@ def ask_advisor(question: str, context: str, conversation_history: list) -> str:
     except Exception:
         pass
 
-    # Load memory from database (NOT filesystem — filesystem writes don't persist on Streamlit Cloud)
     memory_str = load_advisor_memory(limit=50)
 
-    system_prompt = f"""You are the Black Book Advisor built specifically for Ignacio Chavarria — 18, Christian, Miami/Uruguayan, finance major at Florida State University, currently traveling. His parents run an architecture firm. He is building toward $1M by 27, owns a business by 30, family mid-30s. He is aggressive with risk at his current investment amounts. He has two active projects: Black Book (this system) and Olympus (an autonomous trading system, currently paused until summer). He does not have a job — his income comes from parents. His financial situation is that of a college student, not someone with full income. He knows this. Do not treat his numbers as alarming — treat them as exactly where an 18-year-old with his awareness and discipline should be.
+    system_prompt = f"""You are the Black Book Advisor built specifically for Ignacio Chavarria — 18, Christian, Miami/Uruguayan, finance major at Florida State University, currently traveling. His parents run an architecture firm. He is building toward $1M by 27, owns a business by 30, family mid-30s. He is aggressive with risk at his current investment amounts. He has two active projects: Black Book (this system) and Olympus (an autonomous trading system, currently paused until summer). He does not have a job — his income comes from paychecks likely from family support or part-time work. His financial situation is that of a college student, not someone with full income. He knows this. Do not treat his numbers as alarming — treat them as exactly where an 18-year-old with his awareness and discipline should be.
 
 PERMANENT CONTEXT FILE:
 {context_file if context_file else "context.md not loaded — use the facts above."}
@@ -1510,40 +1511,44 @@ MEMORY FROM PAST SESSIONS:
 LIVE FINANCIAL DATA:
 {context}
 
-Respond the way you'd talk to someone you know well. No structure for structure's sake. No bullet points. No filler opener. Start with the actual point. If the answer is one sentence, one sentence. If it needs more room, use it. Reference his real numbers when they matter. Say what the data actually shows, including what he probably doesn't want to hear. Over time, pay attention to how he writes, what he asks, what he cares about — and adapt. The goal is that this feels like someone who genuinely knows him, not a template."""
+Respond the way you'd talk to someone you know well. No structure for structure's sake. No bullet points. No filler opener. Start with the actual point. If the answer is one sentence, one sentence. If it needs more room, use it. Reference his real numbers when they matter. Say what the data actually shows, including what he probably doesn't want to hear. Over time, pay attention to how he writes, what he asks, what he cares about — and adapt. The goal is that this feels like someone who genuinely knows him, not a template. Never use backtick formatting, code blocks, or markdown syntax. Write in plain prose only."""
 
-    messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(conversation_history[-10:])
-    messages.append({"role": "user", "content": question})
+    # Build conversation history for Gemini
+    history = []
+    for msg in conversation_history[-10:]:
+        role = "user" if msg["role"] == "user" else "model"
+        history.append({"role": role, "parts": [msg["content"]]})
+
     try:
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile", messages=messages, max_tokens=1024, temperature=0.7)
-        return response.choices[0].message.content
+        model = genai.GenerativeModel(
+            model_name="gemma-4-31b-it",
+            system_instruction=system_prompt,
+        )
+        chat = model.start_chat(history=history)
+        response = chat.send_message(question)
+        return response.text
     except Exception as e:
         return f"Error: {str(e)}"
 
-
 def extract_and_save_memory(conversation_history: list) -> str:
-    """Extract key points from conversation and save to DB. Returns status message."""
-    if not _GROQ_AVAILABLE or len(conversation_history) < 2:
+    if not _GENAI_AVAILABLE or len(conversation_history) < 2:
         return "Nothing to save."
-    api_key = st.secrets.get("GROQ_API_KEY", "") or os.environ.get("GROQ_API_KEY", "")
-    if not api_key: return "No API key."
+    api_key = st.secrets.get("GOOGLE_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")
+    if not api_key:
+        return "No API key."
     try:
-        client = GroqClient(api_key=api_key)
+        genai.configure(api_key=api_key)
         convo_text = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in conversation_history[-10:])
-        summary_prompt = f"""Extract the key points from this conversation that are worth remembering long term.
+        prompt = f"""Extract the key points from this conversation worth remembering long term.
 Focus on: new goals mentioned, decisions made, patterns identified, anything said about life or systems not already in journals or financial data.
-Be extremely concise. Write in third person. Use plain paragraphs, not bullet points.
-If nothing new or significant was discussed, respond with exactly: NOTHING_TO_SAVE
+Be extremely concise. Write in third person. Plain paragraphs, not bullet points.
+If nothing significant was discussed, respond with exactly: NOTHING_TO_SAVE
 
 CONVERSATION:
 {convo_text}"""
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": summary_prompt}],
-            max_tokens=400, temperature=0.3)
-        summary = response.choices[0].message.content.strip()
+        model = genai.GenerativeModel(model_name="gemma-4-31b-it")
+        response = model.generate_content(prompt)
+        summary = response.text.strip()
         if summary and summary != "NOTHING_TO_SAVE":
             save_advisor_memory_to_db(summary)
             return "Memory saved."
@@ -2061,10 +2066,10 @@ def render_agenda() -> None:
 def render_advisor(transactions_df, balances_df, holdings_df, price_cache_df, settings, food_metrics) -> None:
     st.markdown('<div class="bb-title">Advisor</div>', unsafe_allow_html=True)
     st.markdown('<div class="bb-subtitle">Your private financial advisor</div>', unsafe_allow_html=True)
-    if not _GROQ_AVAILABLE:
-        st.error("Add `groq` to requirements.txt and redeploy."); return
-    if not st.secrets.get("GROQ_API_KEY", ""):
-        st.error("Add GROQ_API_KEY to Streamlit secrets."); return
+    if not _GENAI_AVAILABLE:
+        st.error("Add `google-generativeai` to requirements.txt and redeploy."); return
+    if not st.secrets.get("GOOGLE_API_KEY", ""):
+        st.error("Add GOOGLE_API_KEY to Streamlit secrets."); return
 
     if "advisor_history" not in st.session_state:
         st.session_state.advisor_history = []
