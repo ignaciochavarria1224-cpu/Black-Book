@@ -8,6 +8,7 @@ import json
 import math
 import os
 import re
+import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -104,6 +105,16 @@ class Signal:
     level: str
     title: str
     body: str
+
+
+# ── Utility: strip model thinking artifacts ───────────────────────────────────
+
+def strip_thinking(text: str) -> str:
+    """Remove <think>...</think> blocks, triple-backtick fences, and inline backticks."""
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'```[^`]*```', lambda m: re.sub(r'^```[^\n]*\n?', '', m.group().rstrip('`').rstrip()), text, flags=re.DOTALL)
+    text = re.sub(r'`([^`]+)`', r'\1', text)
+    return text.strip()
 
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
@@ -494,6 +505,8 @@ def init_db() -> None:
         f"CREATE TABLE IF NOT EXISTS journal_entries (id {serial} PRIMARY KEY {ai}, entry_date TEXT NOT NULL, tag TEXT NOT NULL DEFAULT 'General', body TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
         # Advisor memory — stored in DB so it persists across deployments on Streamlit Cloud
         f"CREATE TABLE IF NOT EXISTS advisor_memory (id {serial} PRIMARY KEY {ai}, memory_date TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        # Advisor conversation history
+        f"CREATE TABLE IF NOT EXISTS advisor_conversations (id {serial} PRIMARY KEY {ai}, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     ]
     conn = get_connection()
     try:
@@ -917,6 +930,65 @@ def delete_advisor_memory_entry(entry_id: int) -> None:
     conn = get_connection()
     try:
         db_execute(conn, "DELETE FROM advisor_memory WHERE id = %s", (int(entry_id),))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ── Advisor conversation history ──────────────────────────────────────────────
+
+def save_conversation_message(session_id: str, role: str, content: str) -> None:
+    conn = get_connection()
+    try:
+        db_execute(conn, "INSERT INTO advisor_conversations (session_id, role, content) VALUES (%s, %s, %s)",
+                   (session_id, role, content))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_conversation_history(session_id: str) -> list[dict]:
+    conn = get_connection()
+    try:
+        sql = "SELECT role, content FROM advisor_conversations WHERE session_id = %s ORDER BY created_at ASC, id ASC" if IS_POSTGRES \
+              else "SELECT role, content FROM advisor_conversations WHERE session_id = ? ORDER BY created_at ASC, id ASC"
+        rows = db_execute(conn, sql, (session_id,)).fetchall()
+    finally:
+        conn.close()
+    return [{"role": str(r["role"]), "content": str(r["content"])} for r in rows]
+
+
+def list_conversation_sessions(limit: int = 20) -> pd.DataFrame:
+    conn = get_connection()
+    try:
+        sql = """SELECT session_id,
+                        MIN(created_at) AS created_at,
+                        (SELECT content FROM advisor_conversations c2
+                         WHERE c2.session_id = c1.session_id AND c2.role = 'user'
+                         ORDER BY c2.created_at ASC, c2.id ASC LIMIT 1) AS first_message
+                 FROM advisor_conversations c1
+                 GROUP BY session_id
+                 ORDER BY created_at DESC
+                 LIMIT %s""" if IS_POSTGRES else \
+              """SELECT session_id,
+                        MIN(created_at) AS created_at,
+                        (SELECT content FROM advisor_conversations c2
+                         WHERE c2.session_id = c1.session_id AND c2.role = 'user'
+                         ORDER BY c2.created_at ASC, c2.id ASC LIMIT 1) AS first_message
+                 FROM advisor_conversations c1
+                 GROUP BY session_id
+                 ORDER BY created_at DESC
+                 LIMIT ?"""
+        df = _cursor_to_df(db_execute(conn, sql, (limit,)))
+    finally:
+        conn.close()
+    return df
+
+
+def delete_conversation_session(session_id: str) -> None:
+    conn = get_connection()
+    try:
+        db_execute(conn, "DELETE FROM advisor_conversations WHERE session_id = %s", (session_id,))
         conn.commit()
     finally:
         conn.close()
@@ -1419,69 +1491,233 @@ def reconcile_transactions(cap_one_df, logged_df, account_name) -> pd.DataFrame:
 # ── Advisor ───────────────────────────────────────────────────────────────────
 
 def build_advisor_context(transactions_df, balances_df, holdings_df, price_cache_df, settings, food_metrics) -> str:
+    """Lightweight briefing — tools fetch live detail on demand."""
     today = date.today().strftime("%B %d, %Y")
     nw = build_net_worth(balances_df)
     debt = build_debt_summary(balances_df)
     runway = build_runway(transactions_df, balances_df, food_metrics)
     enriched_h = build_enriched_holdings(holdings_df, price_cache_df) if not holdings_df.empty else pd.DataFrame()
-    sorted_bal = balances_df.sort_values("sort_order")
-    accounts_str = "\n".join(
-        f"  {str(r['name'])}: {format_currency(float(r['display_balance']))} ({'DEBT' if int(r['is_debt']) else str(r['account_type']).upper()})"
-        for _, r in sorted_bal.iterrows())
-    if not transactions_df.empty:
-        tx_lines = "\n".join(
-            f"  {str(r['date'])} · {str(r['description'])} · {format_currency(float(r['amount']))} · {str(r['account'])} · {str(r['type'])}"
-            for _, r in transactions_df.head(20).iterrows())
-    else:
-        tx_lines = "  No transactions logged yet."
-    if not enriched_h.empty:
-        portfolio_str = "\n".join(
-            f"  {str(r['display_name'])}: {format_currency(float(r['current_value']))} (PnL: {format_currency(float(r['total_pnl']))})"
-            for _, r in enriched_h.iterrows())
-        portfolio_total = format_currency(float(enriched_h["current_value"].sum()))
-    else:
-        portfolio_str = "  No holdings yet."; portfolio_total = "$0.00"
-    journal_df = load_journal_entries(limit=5)
-    journal_str = "\n\n".join(
-        f"  [{str(r['entry_date'])} · {str(r['tag'])}]\n  {str(r['body'])[:500]}"
-        for _, r in journal_df.iterrows()) if not journal_df.empty else "  No journal entries yet."
+    portfolio_total = format_currency(float(enriched_h["current_value"].sum())) if not enriched_h.empty else "$0.00"
+    signals = []
+    if debt["total_debt"] > runway["liquid_cash"] * 0.75 and debt["total_debt"] > 0:
+        signals.append("debt pressure high")
+    if runway["runway_days"] < 14:
+        signals.append("runway under 2 weeks")
+    elif runway["runway_days"] < 30:
+        signals.append("runway under 1 month")
+    if food_metrics["remaining_today"] < 0:
+        signals.append("food over daily cap")
+    if not signals:
+        signals.append("no pressure signals")
     return f"""Today is {today}.
-
-FINANCIAL SNAPSHOT
-==================
-Net Worth: {format_currency(nw['net_worth'])}
-Total Assets: {format_currency(nw['assets'])}
-Total Debt: {format_currency(debt['total_debt'])}
-Runway: {runway['runway_days']:.1f} days
-Avg Daily Spend: {format_currency(runway['avg_daily_spending'])}/day
-Portfolio Value: {portfolio_total}
-Food Budget: {format_currency(get_setting_float(settings, 'daily_food_budget'))}/day
-Food Surplus (carry): {format_currency(food_metrics['current_carry_surplus'])}
-Pay Period: {int(get_setting_float(settings, 'pay_period_days'))} days
-
-ACCOUNTS
-========
-{accounts_str}
-
-PORTFOLIO
-=========
-{portfolio_str}
-
-RECENT TRANSACTIONS (last 20)
-==============================
-{tx_lines}
-
-RECENT JOURNAL ENTRIES (last 5)
-================================
-{journal_str}"""
+Net Worth: {format_currency(nw['net_worth'])} | Debt: {format_currency(debt['total_debt'])} | Runway: {runway['runway_days']:.1f} days
+Portfolio: {portfolio_total} | Food surplus: {format_currency(food_metrics['current_carry_surplus'])}
+Top signals: {', '.join(signals)}
+Use your tools to fetch live account balances, transactions, holdings, and spending detail."""
 
 
-def ask_advisor(question: str, context: str, conversation_history: list) -> str:
+# ── Advisor tool functions ────────────────────────────────────────────────────
+
+def advisor_get_account_balances() -> list[dict]:
+    accounts_df = load_accounts()
+    transactions_df = load_transactions()
+    holdings_df = load_holdings()
+    price_cache_df = load_price_cache()
+    balances = build_account_balances(accounts_df, transactions_df, holdings_df, price_cache_df)
+    return [
+        {"name": str(r["name"]), "balance": round(float(r["display_balance"]), 2),
+         "type": str(r["account_type"]), "is_debt": bool(int(r["is_debt"]))}
+        for _, r in balances.iterrows()
+    ]
+
+
+def advisor_get_recent_transactions(limit: int = 20, category: str = None, account: str = None) -> list[dict]:
+    df = load_transactions()
+    if df.empty:
+        return []
+    if category:
+        df = df[df["category"].str.lower() == category.lower()]
+    if account:
+        df = df[df["account"].str.lower() == account.lower()]
+    df = df.head(limit)
+    return [
+        {"date": str(r["date"]), "description": str(r["description"]), "category": str(r["category"]),
+         "amount": round(float(r["amount"]), 2), "account": str(r["account"]), "type": str(r["type"])}
+        for _, r in df.iterrows()
+    ]
+
+
+def advisor_get_spending_by_category(days: int = 30) -> list[dict]:
+    df = load_transactions()
+    if df.empty:
+        return []
+    cutoff = date.today() - timedelta(days=days)
+    df["date"] = pd.to_datetime(df["date"]).dt.date
+    df = df[(df["type"] == "Expense") & (df["date"] >= cutoff)]
+    if df.empty:
+        return []
+    grouped = df.groupby("category", as_index=False)["amount"].sum()
+    grouped = grouped.sort_values("amount", ascending=False)
+    return [{"category": str(r["category"]), "total": round(float(r["amount"]), 2)} for _, r in grouped.iterrows()]
+
+
+def advisor_get_food_metrics() -> dict:
+    transactions_df = load_transactions()
+    settings = get_settings()
+    return build_food_metrics(transactions_df, settings)
+
+
+def advisor_get_portfolio_summary() -> list[dict]:
+    holdings_df = load_holdings()
+    price_cache_df = load_price_cache()
+    if holdings_df.empty:
+        return []
+    enriched = build_enriched_holdings(holdings_df, price_cache_df)
+    return [
+        {"name": str(r["display_name"]), "account": str(r["account"]),
+         "current_value": round(float(r["current_value"]), 2),
+         "amount_invested": round(float(r["amount_invested"]), 2),
+         "total_pnl": round(float(r["total_pnl"]), 2),
+         "tdy_pnl": round(float(r["tdy_pnl"]), 2)}
+        for _, r in enriched.iterrows()
+    ]
+
+
+def advisor_get_net_worth_history(limit: int = 30) -> list[dict]:
+    reports = load_daily_reports(limit=limit)
+    result = []
+    for r in reversed(reports):
+        result.append({
+            "date": r.get("report_date", ""),
+            "net_worth": round(float(r.get("net_worth", 0)), 2),
+            "debt": round(float(r.get("debt", 0)), 2),
+            "portfolio_value": round(float(r.get("portfolio_value", 0)), 2),
+        })
+    return result
+
+
+def advisor_get_paycheck_allocation(amount: float) -> dict:
+    accounts_df = load_accounts()
+    transactions_df = load_transactions()
+    holdings_df = load_holdings()
+    price_cache_df = load_price_cache()
+    settings = get_settings()
+    balances = build_account_balances(accounts_df, transactions_df, holdings_df, price_cache_df)
+    food = build_food_metrics(transactions_df, settings)
+    debt_df = build_debt_summary(balances)["by_account"]
+    alloc = compute_paycheck_allocation(float(amount), settings, debt_df, food_surplus=food["current_carry_surplus"])
+    return {k: v for k, v in alloc.items() if k not in ("debt_breakdown", "dca_targets", "meta")}
+
+
+def advisor_log_transaction(date_str: str, description: str, category: str, amount: float,
+                             account_name: str, tx_type: str) -> dict:
+    try:
+        accounts_df = load_accounts()
+        account_map = {str(r["name"]).lower(): int(r["id"]) for _, r in accounts_df.iterrows()}
+        account_id = account_map.get(account_name.lower())
+        if account_id is None:
+            return {"success": False, "message": f"Account '{account_name}' not found."}
+        tx_date = datetime.strptime(date_str, DATE_FMT).date()
+        if category not in COMMON_CATEGORIES:
+            category = "Other"
+        if tx_type not in ("Expense", "Income", "Transfer"):
+            tx_type = "Expense"
+        add_transaction(tx_date, description, category, float(amount), account_id, tx_type, None, "")
+        return {"success": True, "message": f"Logged {tx_type} of ${amount:.2f} — {description}."}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+# ── Advisor tools schema ──────────────────────────────────────────────────────
+
+def _build_advisor_tools():
     if not _GENAI_AVAILABLE:
-        return "google-generativeai not installed. Add it to requirements.txt."
+        return None
+    try:
+        from google.generativeai.types import Tool, FunctionDeclaration
+        declarations = [
+            FunctionDeclaration(
+                name="advisor_get_account_balances",
+                description="Get current balances for all accounts including cash, credit cards, and investments.",
+                parameters={"type": "object", "properties": {}, "required": []},
+            ),
+            FunctionDeclaration(
+                name="advisor_get_recent_transactions",
+                description="Get recent transactions, optionally filtered by category or account name.",
+                parameters={"type": "object", "properties": {
+                    "limit": {"type": "integer", "description": "Max number of transactions to return (default 20)"},
+                    "category": {"type": "string", "description": "Filter by category name (e.g. Food, Bills)"},
+                    "account": {"type": "string", "description": "Filter by account name (e.g. Checking, Savor)"},
+                }, "required": []},
+            ),
+            FunctionDeclaration(
+                name="advisor_get_spending_by_category",
+                description="Get total spending grouped by category for the last N days.",
+                parameters={"type": "object", "properties": {
+                    "days": {"type": "integer", "description": "Number of days to look back (default 30)"},
+                }, "required": []},
+            ),
+            FunctionDeclaration(
+                name="advisor_get_food_metrics",
+                description="Get current food budget metrics including daily spend, weekly spend, and carry surplus.",
+                parameters={"type": "object", "properties": {}, "required": []},
+            ),
+            FunctionDeclaration(
+                name="advisor_get_portfolio_summary",
+                description="Get current investment portfolio with current value, PnL, and today's PnL per holding.",
+                parameters={"type": "object", "properties": {}, "required": []},
+            ),
+            FunctionDeclaration(
+                name="advisor_get_net_worth_history",
+                description="Get historical net worth, debt, and portfolio value from daily reports.",
+                parameters={"type": "object", "properties": {
+                    "limit": {"type": "integer", "description": "Number of days to return (default 30)"},
+                }, "required": []},
+            ),
+            FunctionDeclaration(
+                name="advisor_get_paycheck_allocation",
+                description="Compute paycheck allocation breakdown for a given paycheck amount.",
+                parameters={"type": "object", "properties": {
+                    "amount": {"type": "number", "description": "Paycheck amount in dollars"},
+                }, "required": ["amount"]},
+            ),
+            FunctionDeclaration(
+                name="advisor_log_transaction",
+                description="Log a new transaction to the database on behalf of the user.",
+                parameters={"type": "object", "properties": {
+                    "date_str": {"type": "string", "description": "Date in YYYY-MM-DD format"},
+                    "description": {"type": "string", "description": "Transaction description"},
+                    "category": {"type": "string", "description": "Category (Food, Bills, Income, etc.)"},
+                    "amount": {"type": "number", "description": "Amount in dollars (positive)"},
+                    "account_name": {"type": "string", "description": "Account name (e.g. Checking, Savor)"},
+                    "tx_type": {"type": "string", "description": "Type: Expense, Income, or Transfer"},
+                }, "required": ["date_str", "description", "category", "amount", "account_name", "tx_type"]},
+            ),
+        ]
+        return Tool(function_declarations=declarations)
+    except Exception:
+        return None
+
+
+_ADVISOR_TOOL_DISPATCH = {
+    "advisor_get_account_balances": lambda args: advisor_get_account_balances(),
+    "advisor_get_recent_transactions": lambda args: advisor_get_recent_transactions(**args),
+    "advisor_get_spending_by_category": lambda args: advisor_get_spending_by_category(**args),
+    "advisor_get_food_metrics": lambda args: advisor_get_food_metrics(),
+    "advisor_get_portfolio_summary": lambda args: advisor_get_portfolio_summary(),
+    "advisor_get_net_worth_history": lambda args: advisor_get_net_worth_history(**args),
+    "advisor_get_paycheck_allocation": lambda args: advisor_get_paycheck_allocation(**args),
+    "advisor_log_transaction": lambda args: advisor_log_transaction(**args),
+}
+
+
+def ask_advisor(question: str, context: str, conversation_history: list) -> tuple[str, list[str]]:
+    """Returns (response_text, tools_used_list)."""
+    if not _GENAI_AVAILABLE:
+        return "google-generativeai not installed. Add it to requirements.txt.", []
     api_key = st.secrets.get("GOOGLE_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")
     if not api_key:
-        return "GOOGLE_API_KEY not found in secrets."
+        return "GOOGLE_API_KEY not found in secrets.", []
 
     genai.configure(api_key=api_key)
 
@@ -1508,27 +1744,59 @@ PERMANENT CONTEXT FILE:
 MEMORY FROM PAST SESSIONS:
 {memory_str}
 
-LIVE FINANCIAL DATA:
+LIVE BRIEFING:
 {context}
 
-Respond the way you'd talk to someone you know well. No structure for structure's sake. No bullet points. No filler opener. Start with the actual point. If the answer is one sentence, one sentence. If it needs more room, use it. Reference his real numbers when they matter. Say what the data actually shows, including what he probably doesn't want to hear. Over time, pay attention to how he writes, what he asks, what he cares about — and adapt. The goal is that this feels like someone who genuinely knows him, not a template. Never use backtick formatting, code blocks, or markdown syntax. Write in plain prose only."""
+You have tools available to fetch live financial data from the database — account balances, transactions, spending by category, food metrics, portfolio, net worth history, paycheck allocation, and transaction logging. Use them whenever the question requires specific numbers rather than guessing from the briefing. Call as many as needed.
 
-    # Build conversation history for Gemini
+Respond the way you'd talk to someone you know well. No structure for structure's sake. No bullet points. No filler opener. Start with the actual point. If the answer is one sentence, one sentence. If it needs more room, use it. Reference his real numbers when they matter. Say what the data actually shows, including what he probably doesn't want to hear. Never use backtick formatting, code blocks, or markdown syntax. Write in plain prose only."""
+
     history = []
     for msg in conversation_history[-10:]:
         role = "user" if msg["role"] == "user" else "model"
         history.append({"role": role, "parts": [msg["content"]]})
 
+    tools_used: list[str] = []
+    advisor_tool = _build_advisor_tools()
+
     try:
         model = genai.GenerativeModel(
-            model_name="gemma-4-31b-it",
+            model_name="gemini-2.0-flash",
             system_instruction=system_prompt,
+            tools=[advisor_tool] if advisor_tool else [],
         )
         chat = model.start_chat(history=history)
         response = chat.send_message(question)
-        return response.text
+
+        # Tool-calling loop — max 5 iterations
+        for _ in range(5):
+            fn_calls = [p for p in response.parts if hasattr(p, "function_call") and p.function_call.name]
+            if not fn_calls:
+                break
+            tool_results = []
+            for part in fn_calls:
+                fn_name = part.function_call.name
+                fn_args = dict(part.function_call.args) if part.function_call.args else {}
+                tools_used.append(fn_name)
+                try:
+                    result = _ADVISOR_TOOL_DISPATCH[fn_name](fn_args) if fn_name in _ADVISOR_TOOL_DISPATCH else {"error": f"Unknown tool: {fn_name}"}
+                except Exception as exc:
+                    result = {"error": str(exc)}
+                tool_results.append(
+                    genai.protos.Part(
+                        function_response=genai.protos.FunctionResponse(
+                            name=fn_name,
+                            response={"result": json.dumps(result, default=str)},
+                        )
+                    )
+                )
+            response = chat.send_message(tool_results)
+
+        text = response.text if hasattr(response, "text") else ""
+        return strip_thinking(text), tools_used
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"Error: {str(e)}", tools_used
+
 
 def extract_and_save_memory(conversation_history: list) -> str:
     if not _GENAI_AVAILABLE or len(conversation_history) < 2:
@@ -1546,9 +1814,9 @@ If nothing significant was discussed, respond with exactly: NOTHING_TO_SAVE
 
 CONVERSATION:
 {convo_text}"""
-        model = genai.GenerativeModel(model_name="gemma-4-31b-it")
+        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
         response = model.generate_content(prompt)
-        summary = response.text.strip()
+        summary = strip_thinking(response.text.strip())
         if summary and summary != "NOTHING_TO_SAVE":
             save_advisor_memory_to_db(summary)
             return "Memory saved."
@@ -2071,17 +2339,27 @@ def render_advisor(transactions_df, balances_df, holdings_df, price_cache_df, se
     if not st.secrets.get("GOOGLE_API_KEY", ""):
         st.error("Add GOOGLE_API_KEY to Streamlit secrets."); return
 
+    # ── Session state init ────────────────────────────────────────────────────
     if "advisor_history" not in st.session_state:
         st.session_state.advisor_history = []
-    if "advisor_context" not in st.session_state:
-        st.session_state.advisor_context = ""
+    if "advisor_tools_used" not in st.session_state:
+        st.session_state.advisor_tools_used = {}  # message_index -> list[str]
 
-    if not st.session_state.advisor_context:
-        with st.spinner("Loading your data..."):
-            st.session_state.advisor_context = build_advisor_context(
-                transactions_df, balances_df, holdings_df, price_cache_df, settings, food_metrics)
+    # Generate session_id on first load
+    if "advisor_session_id" not in st.session_state:
+        st.session_state.advisor_session_id = (
+            date.today().strftime("%Y%m%d") + "-" + uuid.uuid4().hex[:6]
+        )
+        # Load history from DB if session already has messages
+        existing = load_conversation_history(st.session_state.advisor_session_id)
+        if existing:
+            st.session_state.advisor_history = existing
 
-   # Controls
+    # Always rebuild context on each message cycle (live)
+    st.session_state.advisor_context = build_advisor_context(
+        transactions_df, balances_df, holdings_df, price_cache_df, settings, food_metrics)
+
+    # ── Controls ──────────────────────────────────────────────────────────────
     ctrl1, ctrl2, ctrl3 = st.columns([1, 1, 1])
     with ctrl1:
         if st.button("↻  Refresh Data", use_container_width=True):
@@ -2095,10 +2373,15 @@ def render_advisor(transactions_df, balances_df, holdings_df, price_cache_df, se
             st.success(msg)
     with ctrl3:
         if st.button("✕  Clear Chat", use_container_width=True):
-            st.session_state.advisor_history = []; st.rerun()
+            st.session_state.advisor_history = []
+            st.session_state.advisor_tools_used = {}
+            st.session_state.advisor_session_id = (
+                date.today().strftime("%Y%m%d") + "-" + uuid.uuid4().hex[:6]
+            )
+            st.rerun()
     st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
 
-    # Suggested prompts on empty state
+    # ── Suggested prompts on empty state ──────────────────────────────────────
     if not st.session_state.advisor_history:
         st.markdown('<div style="font-family:JetBrains Mono,monospace;font-size:0.6rem;letter-spacing:0.2em;text-transform:uppercase;color:#374151;margin-bottom:0.6rem">Suggested</div>', unsafe_allow_html=True)
         suggestions = [
@@ -2111,33 +2394,48 @@ def render_advisor(transactions_df, balances_df, holdings_df, price_cache_df, se
         for i, s in enumerate(suggestions):
             if cols[i % 2].button(s, key=f"suggestion_{i}", use_container_width=True):
                 with st.spinner("Thinking..."):
-                    response = ask_advisor(s, st.session_state.advisor_context, st.session_state.advisor_history)
+                    response_text, tools_used = ask_advisor(s, st.session_state.advisor_context, st.session_state.advisor_history)
+                user_idx = len(st.session_state.advisor_history)
                 st.session_state.advisor_history.append({"role": "user", "content": s})
-                st.session_state.advisor_history.append({"role": "assistant", "content": response})
+                st.session_state.advisor_history.append({"role": "assistant", "content": response_text})
+                if tools_used:
+                    st.session_state.advisor_tools_used[user_idx + 1] = tools_used
+                save_conversation_message(st.session_state.advisor_session_id, "user", s)
+                save_conversation_message(st.session_state.advisor_session_id, "assistant", response_text)
                 st.rerun()
 
-    # Conversation
-    for msg in st.session_state.advisor_history:
+    # ── Conversation display ──────────────────────────────────────────────────
+    for idx, msg in enumerate(st.session_state.advisor_history):
         if msg["role"] == "user":
             st.markdown(
                 f'<div style="display:flex;justify-content:flex-end;margin-bottom:0.8rem">'
                 f'<div style="background:#14141F;border:1px solid rgba(201,168,76,0.1);'
                 f'padding:0.7rem 1rem;max-width:72%;font-size:0.85rem;color:#F2EDE4;line-height:1.6">'
-                f'{msg["content"]}</div></div>',
+                f'{msg["content"].replace(chr(10), "<br>")}</div></div>',
                 unsafe_allow_html=True)
         else:
-            # Strip backtick formatting so it doesn't render as green code blocks
-            clean = re.sub(r'```[^`]*```', lambda m: m.group().strip('`').split('\n', 1)[-1].strip(), msg["content"], flags=re.DOTALL)
-            clean = re.sub(r'`([^`]+)`', r'\1', clean)
+            clean = strip_thinking(msg["content"]).replace("\n", "<br>")
             st.markdown(
-                f'<div style="display:flex;justify-content:flex-start;margin-bottom:0.8rem">'
+                f'<div style="display:flex;justify-content:flex-start;margin-bottom:0.4rem">'
                 f'<div class="bb-response" style="background:#0D0D18;border:1px solid rgba(255,255,255,0.04);'
                 f'border-left:2px solid #C9A84C;'
                 f'padding:0.8rem 1.1rem;max-width:88%;font-size:0.88rem;color:#9A9080;line-height:1.75">'
                 f'{clean}</div></div>',
                 unsafe_allow_html=True)
+            # Tools used indicator
+            tools_for_msg = st.session_state.advisor_tools_used.get(idx, [])
+            if tools_for_msg:
+                unique_tools = list(dict.fromkeys(tools_for_msg))
+                tools_label = "  ·  ".join(t.replace("advisor_", "") for t in unique_tools)
+                st.markdown(
+                    f'<div style="font-family:JetBrains Mono,monospace;font-size:0.58rem;'
+                    f'color:#374151;letter-spacing:0.08em;margin-bottom:0.8rem;padding-left:2px">'
+                    f'tools: {tools_label}</div>',
+                    unsafe_allow_html=True)
+            else:
+                st.markdown("<div style='margin-bottom:0.8rem'></div>", unsafe_allow_html=True)
 
-    # Input
+    # ── Input ─────────────────────────────────────────────────────────────────
     st.markdown("<div style='margin-top:1.5rem'></div>", unsafe_allow_html=True)
     with st.form("advisor_form", clear_on_submit=True):
         question = st.text_area(
@@ -2146,12 +2444,18 @@ def render_advisor(transactions_df, balances_df, holdings_df, price_cache_df, se
         submitted = st.form_submit_button("Send", type="primary", use_container_width=True)
         if submitted and question.strip():
             with st.spinner("Thinking..."):
-                response = ask_advisor(question.strip(), st.session_state.advisor_context, st.session_state.advisor_history)
+                response_text, tools_used = ask_advisor(
+                    question.strip(), st.session_state.advisor_context, st.session_state.advisor_history)
+            user_idx = len(st.session_state.advisor_history)
             st.session_state.advisor_history.append({"role": "user", "content": question.strip()})
-            st.session_state.advisor_history.append({"role": "assistant", "content": response})
+            st.session_state.advisor_history.append({"role": "assistant", "content": response_text})
+            if tools_used:
+                st.session_state.advisor_tools_used[user_idx + 1] = tools_used
+            save_conversation_message(st.session_state.advisor_session_id, "user", question.strip())
+            save_conversation_message(st.session_state.advisor_session_id, "assistant", response_text)
             st.rerun()
 
-    # Memory viewer
+    # ── Memory viewer ─────────────────────────────────────────────────────────
     mem_df = load_advisor_memory_df(limit=20)
     if not mem_df.empty:
         st.subheader("Memory Log")
@@ -2162,6 +2466,30 @@ def render_advisor(transactions_df, balances_df, holdings_df, price_cache_df, se
             st.markdown(f'<div class="bb-memory-entry"><div style="font-family:JetBrains Mono,monospace;font-size:0.6rem;color:#374151;margin-bottom:0.3rem">{display_date}</div><div style="font-size:0.82rem;color:#9ca3af;line-height:1.5">{str(row["body"])}</div></div>', unsafe_allow_html=True)
             if st.button("Delete", key=f"mem_del_{mid}"):
                 delete_advisor_memory_entry(mid); st.rerun()
+
+    # ── Past Sessions ─────────────────────────────────────────────────────────
+    sessions_df = list_conversation_sessions(limit=20)
+    if not sessions_df.empty:
+        with st.expander("Past Sessions"):
+            for _, srow in sessions_df.iterrows():
+                sid = str(srow["session_id"])
+                if sid == st.session_state.advisor_session_id:
+                    continue  # skip current session
+                snippet = str(srow.get("first_message") or "")[:80]
+                created = str(srow.get("created_at", ""))[:16]
+                col_a, col_b, col_c = st.columns([3, 1, 1])
+                col_a.markdown(
+                    f'<div style="font-family:JetBrains Mono,monospace;font-size:0.7rem;color:#9A9080">'
+                    f'<span style="color:#374151">{created}</span>  {snippet}</div>',
+                    unsafe_allow_html=True)
+                if col_b.button("Load", key=f"load_sess_{sid}"):
+                    hist = load_conversation_history(sid)
+                    st.session_state.advisor_history = hist
+                    st.session_state.advisor_tools_used = {}
+                    st.session_state.advisor_session_id = sid
+                    st.rerun()
+                if col_c.button("Delete", key=f"del_sess_{sid}"):
+                    delete_conversation_session(sid); st.rerun()
 
 
 def render_settings(settings, accounts_df) -> None:
