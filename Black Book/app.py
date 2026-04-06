@@ -1761,7 +1761,7 @@ Respond the way you'd talk to someone you know well. No structure for structure'
 
     try:
         model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
+            model_name="gemini-1.5-flash-latest",
             system_instruction=system_prompt,
             tools=[advisor_tool] if advisor_tool else [],
         )
@@ -1814,7 +1814,7 @@ If nothing significant was discussed, respond with exactly: NOTHING_TO_SAVE
 
 CONVERSATION:
 {convo_text}"""
-        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+        model = genai.GenerativeModel(model_name="gemini-1.5-flash-latest")
         response = model.generate_content(prompt)
         summary = strip_thinking(response.text.strip())
         if summary and summary != "NOTHING_TO_SAVE":
