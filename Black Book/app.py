@@ -2343,62 +2343,138 @@ def render_journal() -> None:
                         if st.button("Delete", key=f"jdel_btn_{entry_id}", type="primary"):
                             delete_journal_entry(entry_id); st.rerun()
     with tab3:
-        st.markdown("### Meridian")
-        st.caption("Meridian reads your journal entries, evolves beliefs, and generates adaptive daily questions.")
+        st.markdown('<div class="bb-title" style="font-size:1.6rem">Meridian</div>', unsafe_allow_html=True)
+        st.markdown('<div class="bb-subtitle">Second brain · belief evolution</div>', unsafe_allow_html=True)
         if not IS_POSTGRES:
-            st.info("Meridian requires PostgreSQL. Run Black Book with a Neon database to use this feature.")
+            st.info("Meridian requires PostgreSQL.")
         else:
-            # Show last cycle info from meridian_questions
+            def _col(row, idx, name):
+                try: return row[name]
+                except (KeyError, TypeError): return row[idx]
+
+            # ── Load all Meridian data ──────────────────────────────────────
             try:
-                _mc = get_connection()
-                _mcur = _mc.cursor()
+                _mc = get_connection(); _mcur = _mc.cursor()
                 _mcur.execute("SELECT generated_date, id FROM meridian_questions ORDER BY id DESC LIMIT 1")
                 _mrow = _mcur.fetchone()
                 _mcur.execute("SELECT status, requested_at FROM meridian_jobs ORDER BY id DESC LIMIT 1")
                 _jrow = _mcur.fetchone()
+                _mcur.execute(
+                    "SELECT note_id, title, stage, fitness, maturity, domains, body, cycle "
+                    "FROM meridian_notes ORDER BY fitness DESC NULLS LAST"
+                )
+                _notes_raw = _mcur.fetchall()
                 _mcur.close(); _mc.close()
             except Exception:
-                _mrow = None; _jrow = None
+                _mrow = None; _jrow = None; _notes_raw = []
 
-            def _col(row, idx, name):
-                """Access row by name (dict cursor) or index (tuple cursor)."""
-                try:
-                    return row[name]
-                except (KeyError, TypeError):
-                    return row[idx]
+            # ── Cycle stats bar ────────────────────────────────────────────
+            _gd = _col(_mrow, 0, "generated_date") if _mrow else None
+            _jstatus = _col(_jrow, 0, "status") if _jrow else None
+            _jreq = _col(_jrow, 1, "requested_at") if _jrow else None
 
-            if _mrow:
-                _gd = _col(_mrow, 0, "generated_date")
-                _mid = _col(_mrow, 1, "id")
-                st.markdown(f"**Last cycle:** {str(_gd)[:10] if _gd else 'unknown'} &nbsp;·&nbsp; Questions batch #{_mid if _mid else '?'}")
-            else:
-                st.markdown("**No cycles run yet.**")
+            _notes = [
+                {
+                    "id": _col(r, 0, "note_id"),
+                    "title": _col(r, 1, "title"),
+                    "stage": _col(r, 2, "stage"),
+                    "fitness": _col(r, 3, "fitness"),
+                    "maturity": _col(r, 4, "maturity"),
+                    "domains": (_col(r, 5, "domains") or "").split(","),
+                    "body": _col(r, 6, "body"),
+                    "cycle": _col(r, 7, "cycle"),
+                }
+                for r in _notes_raw
+            ]
 
-            if _jrow:
-                _jstatus = _col(_jrow, 0, "status")
-                _jreq = _col(_jrow, 1, "requested_at")
-            else:
-                _jstatus = None; _jreq = None
+            _stage_counts = {}
+            for _n in _notes:
+                _s = _n["stage"]
+                _stage_counts[_s] = _stage_counts.get(_s, 0) + 1
 
-            if _jstatus == "pending":
-                st.warning(f"Cycle queued — waiting for Meridian to pick it up. (Requested {str(_jreq)[:16]})")
-            else:
-                if st.button("Run Meridian Cycle", type="primary", use_container_width=True):
-                    try:
-                        _wc = get_connection()
-                        _wcur = _wc.cursor()
-                        _wcur.execute(
-                            "INSERT INTO meridian_jobs (status, requested_at) VALUES ('pending', %s)",
-                            (datetime.now().isoformat(),)
-                        )
-                        _wc.commit()
-                        _wcur.close(); _wc.close()
-                        st.success("Cycle queued. Run `python evolve.py evolve` on your machine to execute it.")
-                    except Exception as e:
-                        st.error(f"Could not queue job: {e}")
+            _avg_fit = round(sum(n["fitness"] or 0 for n in _notes) / len(_notes), 1) if _notes else 0
+
+            # Stats row
+            _sc1, _sc2, _sc3, _sc4 = st.columns(4)
+            _sc1.metric("Seeds", _stage_counts.get("seed", 0))
+            _sc2.metric("Sprouts", _stage_counts.get("sprout", 0))
+            _sc3.metric("Trees", _stage_counts.get("tree", 0))
+            _sc4.metric("Avg fitness", _avg_fit)
 
             st.markdown("---")
-            st.caption("After queuing, open a terminal and run: `python evolve.py evolve` in your Meridian folder.")
+
+            # ── Run cycle button ───────────────────────────────────────────
+            _btn_col, _info_col = st.columns([1, 2])
+            with _btn_col:
+                if _jstatus == "pending":
+                    st.warning("Cycle queued...")
+                    st.caption(f"Requested {str(_jreq)[:16]}")
+                else:
+                    if st.button("Run Cycle", type="primary", use_container_width=True):
+                        try:
+                            _wc = get_connection(); _wcur = _wc.cursor()
+                            _wcur.execute(
+                                "INSERT INTO meridian_jobs (status, requested_at) VALUES ('pending', %s)",
+                                (datetime.now().isoformat(),)
+                            )
+                            _wc.commit(); _wcur.close(); _wc.close()
+                            st.success("Queued. Run `python evolve.py evolve`.")
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+            with _info_col:
+                if _gd:
+                    st.caption(f"Last questions: {str(_gd)[:10]}")
+
+            st.markdown("---")
+
+            # ── Vault view ─────────────────────────────────────────────────
+            if not _notes:
+                st.info("No notes in vault yet. Run a cycle to populate.")
+            else:
+                _STAGE_ORDER = ["framework", "tree", "sprout", "seed"]
+                _STAGE_LABELS = {
+                    "framework": "Frameworks",
+                    "tree": "Trees",
+                    "sprout": "Sprouts",
+                    "seed": "Seeds",
+                }
+                _STAGE_COLORS = {
+                    "framework": "#FFD700",
+                    "tree": "#E8A020",
+                    "sprout": "#5BA85A",
+                    "seed": "#4A90D9",
+                }
+
+                _filter_stage = st.selectbox(
+                    "Filter by stage",
+                    ["All"] + [_STAGE_LABELS[s] for s in _STAGE_ORDER if _stage_counts.get(s, 0) > 0],
+                    key="meridian_stage_filter"
+                )
+                _filter_map = {v: k for k, v in _STAGE_LABELS.items()}
+                _filtered = [
+                    n for n in _notes
+                    if _filter_stage == "All" or n["stage"] == _filter_map.get(_filter_stage)
+                ]
+
+                for _stage in _STAGE_ORDER:
+                    _group = [n for n in _filtered if n["stage"] == _stage]
+                    if not _group:
+                        continue
+                    _color = _STAGE_COLORS[_stage]
+                    st.markdown(
+                        f'<div style="font-family:JetBrains Mono,monospace;font-size:0.65rem;'
+                        f'letter-spacing:0.15em;text-transform:uppercase;color:{_color};'
+                        f'margin:1.2rem 0 0.4rem">— {_STAGE_LABELS[_stage]} ({len(_group)}) —</div>',
+                        unsafe_allow_html=True
+                    )
+                    for _n in _group:
+                        _fit = f"{_n['fitness']:.0f}" if _n["fitness"] else "—"
+                        _doms = ", ".join(d for d in _n["domains"] if d)[:60]
+                        with st.expander(f"{_n['title'][:80]}   · fit {_fit}", expanded=False):
+                            if _doms:
+                                st.caption(_doms)
+                            if _n["body"]:
+                                st.markdown(_n["body"][:1500])
 
 
 def render_agenda() -> None:
