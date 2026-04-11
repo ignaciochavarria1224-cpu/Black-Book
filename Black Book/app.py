@@ -2280,8 +2280,11 @@ def render_journal() -> None:
                 )
                 _row = _cur.fetchone()
                 if _row:
-                    _data = _row[0] if not isinstance(_row[0], str) else __import__('json').loads(_row[0])
-                    _meridian_qs = [q.get("question", "") for q in _data if q.get("question")]
+                    # Support dict cursor (keyed) and tuple cursor (indexed)
+                    _raw = _row["questions"] if isinstance(_row, dict) else _row[0]
+                    if isinstance(_raw, str):
+                        _raw = json.loads(_raw)
+                    _meridian_qs = [q.get("question", "") for q in _raw if q.get("question")]
                 _cur.close(); _conn.close()
             except Exception:
                 pass
