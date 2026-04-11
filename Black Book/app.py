@@ -99,9 +99,9 @@ STOCK_NAME_TO_TICKER = {
     "Invesco QQQ (QQQ)": "QQQ", "SPDR S&P 500 (SPY)": "SPY",
 }
 
-C_GREEN  = "#00c896"
-C_GOLD   = "#f0a500"
-C_RED    = "#ff4d4d"
+C_GREEN  = "#00FFB3"
+C_GOLD   = "#E040FB"
+C_RED    = "#FF3366"
 C_BLUE   = "#4da6ff"
 C_PURPLE = "#a78bfa"
 C_PINK   = "#f472b6"
@@ -133,337 +133,326 @@ def strip_thinking(text: str) -> str:
 def inject_css() -> None:
     st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500;600&display=swap');
 
-    /* ── Palette: Old Money meets New Age ── */
+    /* ── Palette ── */
     :root {
-        --gold: #C9A84C;
-        --gold-dim: rgba(201,168,76,0.12);
-        --gold-border: rgba(201,168,76,0.2);
-        --cream: #F2EDE4;
-        --cream-dim: #9A9080;
-        --bg-deep: #080810;
-        --bg-card: #0D0D18;
-        --bg-elevated: #121220;
-        --border: rgba(255,255,255,0.05);
-        --green: #00c896;
-        --red: #ff4d4d;
-        --gold-accent: #f0a500;
+        --mg:  #E040FB;  --mg-a: rgba(224,64,251,0.14);  --mg-glow: rgba(224,64,251,0.28);
+        --cy:  #00E5FF;  --cy-a: rgba(0,229,255,0.11);
+        --pu:  #BD34FE;  --pu-a: rgba(189,52,254,0.12);
+        --bg0: #03030A;
+        --bg1: rgba(10,5,22,0.72);
+        --bg2: rgba(16,8,32,0.52);
+        --b0:  rgba(189,52,254,0.20);
+        --b1:  rgba(255,255,255,0.04);
+        --t0:  rgba(240,235,255,0.92);
+        --t1:  rgba(180,150,220,0.52);
+        --t2:  rgba(130,105,170,0.32);
+        --go:  #00FFB3;  --go-a: rgba(0,255,179,0.12);
+        --re:  #FF3366;  --re-a: rgba(255,51,102,0.12);
+        /* aliases for compatibility with inline styles */
+        --gold: var(--mg); --gold-dim: var(--mg-a); --gold-border: var(--b0);
+        --gold-accent: var(--cy); --cream: var(--t0); --cream-dim: var(--t1);
+        --bg-deep: var(--bg0); --bg-card: var(--bg2); --bg-elevated: var(--bg1);
+        --border: var(--b1); --green: var(--go); --red: var(--re);
     }
 
-    .main > div { padding-top: 0.5rem; }
+    /* ── Root ── */
+    html, body, .stApp { background: var(--bg0) !important; }
+    [data-testid="stAppViewContainer"] {
+        background:
+            radial-gradient(ellipse 65% 28% at 22% -4%, rgba(189,52,254,0.09) 0%, transparent 100%),
+            radial-gradient(ellipse 45% 22% at 78% -4%, rgba(0,229,255,0.07) 0%, transparent 100%),
+            var(--bg0);
+        min-height: 100vh;
+    }
+    [data-testid="stHeader"] { background: transparent !important; }
+    .main > div { padding-top: 0.6rem; }
+    * { scrollbar-width: thin; scrollbar-color: rgba(189,52,254,0.3) transparent; }
+    *::-webkit-scrollbar { width: 4px; height: 4px; }
+    *::-webkit-scrollbar-thumb { background: rgba(189,52,254,0.35); border-radius: 2px; }
 
     /* ── Sidebar ── */
     section[data-testid="stSidebar"] {
-        background: #07070F;
-        border-right: 1px solid var(--gold-border);
+        background: rgba(5,2,12,0.96) !important;
+        border-right: 1px solid var(--b0);
+        backdrop-filter: blur(20px);
     }
     section[data-testid="stSidebar"] > div {
-        display: flex;
-        flex-direction: column;
-        height: 100vh;
-        padding-bottom: 1rem;
+        display: flex; flex-direction: column; height: 100vh; padding-bottom: 1rem;
     }
 
     /* ── Sidebar brand ── */
     .bb-sidebar-brand {
-        font-family: 'Playfair Display', serif;
-        font-size: 1.6rem;
-        font-weight: 900;
-        color: var(--gold);
-        letter-spacing: 0.04em;
-        line-height: 1.1;
-        padding: 0.2rem 0 0.1rem 0;
+        font-family: 'Syne', sans-serif;
+        font-size: 1.45rem; font-weight: 800; letter-spacing: 0.05em; line-height: 1.1;
+        padding: 0.2rem 0 0.05rem 0;
+        background: linear-gradient(120deg, var(--mg) 0%, var(--pu) 55%, var(--cy) 100%);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
     }
     .bb-sidebar-year {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 0.55rem;
-        letter-spacing: 0.3em;
-        color: rgba(201,168,76,0.35);
-        text-transform: uppercase;
-        margin-top: 0.15rem;
-        margin-bottom: 0.8rem;
+        font-size: 0.52rem; letter-spacing: 0.3em; color: var(--t2);
+        text-transform: uppercase; margin-top: 0.12rem; margin-bottom: 0.9rem;
     }
 
     /* ── Sidebar nav ── */
     [data-testid="stRadio"] > div { gap: 0 !important; }
     [data-testid="stRadio"] label {
         font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.68rem !important;
-        letter-spacing: 0.1em !important;
-        color: var(--cream-dim) !important;
-        padding: 0.45rem 0.6rem !important;
-        border-radius: 0 !important;
-        border-left: 1px solid transparent !important;
-        transition: all 0.15s ease !important;
-        text-transform: uppercase !important;
+        font-size: 0.64rem !important; letter-spacing: 0.12em !important;
+        color: var(--t1) !important; padding: 0.48rem 0.7rem !important;
+        border-radius: 0 !important; border-left: 2px solid transparent !important;
+        transition: all 0.15s ease !important; text-transform: uppercase !important;
     }
     [data-testid="stRadio"] label:hover {
-        color: var(--cream) !important;
-        border-left-color: var(--gold-border) !important;
-        background: var(--gold-dim) !important;
+        color: var(--t0) !important; border-left-color: rgba(189,52,254,0.4) !important;
+        background: var(--pu-a) !important;
     }
     [data-testid="stRadio"] label[data-selected="true"],
     [data-testid="stRadio"] label[aria-checked="true"] {
-        color: var(--gold) !important;
-        border-left: 1px solid var(--gold) !important;
-        background: var(--gold-dim) !important;
+        color: var(--mg) !important; border-left: 2px solid var(--mg) !important;
+        background: var(--mg-a) !important;
+        box-shadow: inset 10px 0 20px rgba(224,64,251,0.07) !important;
+        text-shadow: 0 0 14px rgba(224,64,251,0.45) !important;
     }
 
-    /* ── Sidebar bottom label ── */
+    /* ── Sidebar footer ── */
     .bb-sidebar-footer {
-        margin-top: auto;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.55rem;
-        letter-spacing: 0.15em;
-        color: rgba(201,168,76,0.25);
-        text-transform: uppercase;
-        padding-top: 1rem;
-        border-top: 1px solid var(--gold-border);
+        margin-top: auto; font-family: 'JetBrains Mono', monospace;
+        font-size: 0.5rem; letter-spacing: 0.18em; color: var(--t2);
+        text-transform: uppercase; padding-top: 1rem; border-top: 1px solid var(--b0);
     }
 
     /* ── Page titles ── */
     .bb-title {
-        font-family: 'Playfair Display', serif;
-        font-size: 2.4rem;
-        font-weight: 900;
-        letter-spacing: 0.03em;
-        color: var(--cream);
-        line-height: 1;
-        margin-bottom: 0;
+        font-family: 'Syne', sans-serif;
+        font-size: 2.2rem; font-weight: 800; letter-spacing: 0.02em; line-height: 1; margin-bottom: 0;
+        background: linear-gradient(120deg, var(--mg) 0%, var(--pu) 55%, var(--cy) 100%);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
     }
     .bb-subtitle {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 0.58rem;
-        letter-spacing: 0.28em;
-        color: rgba(201,168,76,0.3);
-        text-transform: uppercase;
-        margin-bottom: 1.2rem;
-        border-bottom: 1px solid var(--gold-border);
-        padding-bottom: 0.8rem;
+        font-size: 0.54rem; letter-spacing: 0.3em; color: var(--t1);
+        text-transform: uppercase; margin-bottom: 1.4rem;
+        border-bottom: 1px solid var(--b0); padding-bottom: 0.7rem;
     }
 
     /* ── Section headers ── */
     h2, h3 {
         font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.6rem !important;
-        font-weight: 500 !important;
-        letter-spacing: 0.22em !important;
-        text-transform: uppercase !important;
-        color: rgba(201,168,76,0.4) !important;
-        margin-top: 1.5rem !important;
-        margin-bottom: 0.5rem !important;
+        font-size: 0.56rem !important; font-weight: 500 !important;
+        letter-spacing: 0.26em !important; text-transform: uppercase !important;
+        color: var(--t1) !important; margin-top: 1.8rem !important; margin-bottom: 0.5rem !important;
     }
 
     /* ── Metrics ── */
     [data-testid="stMetric"] {
-        background: var(--bg-card);
-        border: 1px solid var(--border);
-        border-top: 1px solid var(--gold-border);
-        border-radius: 0;
+        background: var(--bg2); backdrop-filter: blur(12px);
+        border: 1px solid var(--b0); border-radius: 6px;
         padding: 0.9rem 1rem 0.7rem 1rem;
-        position: relative;
+        box-shadow: 0 4px 28px rgba(189,52,254,0.07), inset 0 1px 0 rgba(255,255,255,0.04);
+        transition: box-shadow 0.2s ease;
+    }
+    [data-testid="stMetric"]:hover {
+        box-shadow: 0 4px 32px rgba(224,64,251,0.14), inset 0 1px 0 rgba(255,255,255,0.06);
     }
     [data-testid="stMetricLabel"] p {
         font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.58rem !important;
-        text-transform: uppercase;
-        letter-spacing: 0.15em;
-        color: var(--cream-dim) !important;
+        font-size: 0.56rem !important; text-transform: uppercase;
+        letter-spacing: 0.18em; color: var(--t1) !important;
     }
     [data-testid="stMetricValue"] {
-        font-family: 'Playfair Display', serif !important;
-        font-size: 1.3rem !important;
-        color: var(--cream) !important;
+        font-family: 'Syne', sans-serif !important;
+        font-size: 1.3rem !important; font-weight: 700 !important; color: var(--t0) !important;
     }
-    [data-testid="stMetricDelta"] {
-        font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.68rem !important;
-    }
-
-    /* ── DataFrames ── */
-    [data-testid="stDataFrame"] {
-        border: 1px solid var(--gold-border) !important;
-        border-radius: 0 !important;
-    }
+    [data-testid="stMetricDelta"] { font-family: 'JetBrains Mono', monospace !important; font-size: 0.65rem !important; }
 
     /* ── Buttons ── */
     [data-testid="baseButton-primary"] {
-        background: var(--gold) !important;
-        color: #080810 !important;
-        border: none !important;
-        border-radius: 0 !important;
-        letter-spacing: 0.12em;
-        font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.68rem !important;
-        font-weight: 600 !important;
-        text-transform: uppercase;
+        background: linear-gradient(135deg, var(--mg) 0%, var(--pu) 100%) !important;
+        color: #fff !important; border: none !important; border-radius: 4px !important;
+        box-shadow: 0 0 18px var(--mg-glow) !important;
+        font-family: 'JetBrains Mono', monospace !important; font-size: 0.64rem !important;
+        font-weight: 500 !important; letter-spacing: 0.13em !important;
+        text-transform: uppercase !important; transition: all 0.2s ease !important;
     }
     [data-testid="baseButton-primary"]:hover {
-        background: #D4B55A !important;
+        box-shadow: 0 0 28px rgba(224,64,251,0.5) !important; filter: brightness(1.1) !important;
     }
     [data-testid="baseButton-secondary"] {
-        background: transparent !important;
-        color: var(--cream-dim) !important;
-        border: 1px solid rgba(255,255,255,0.08) !important;
-        border-radius: 0 !important;
-        letter-spacing: 0.1em;
-        font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.65rem !important;
-        text-transform: uppercase;
-        transition: all 0.15s ease !important;
+        background: transparent !important; color: var(--t1) !important;
+        border: 1px solid var(--b0) !important; border-radius: 4px !important;
+        font-family: 'JetBrains Mono', monospace !important; font-size: 0.62rem !important;
+        letter-spacing: 0.1em !important; text-transform: uppercase !important;
+        transition: all 0.2s ease !important;
     }
     [data-testid="baseButton-secondary"]:hover {
-        border-color: var(--gold-border) !important;
-        color: var(--cream) !important;
+        border-color: var(--mg) !important; color: var(--mg) !important;
+        box-shadow: 0 0 12px var(--mg-a) !important;
     }
 
-    /* ── Cards ── */
+    /* ── Glass cards ── */
     .bb-report-card {
-        background: var(--bg-card);
-        border: 1px solid var(--border);
-        border-top: 1px solid var(--gold-border);
-        border-radius: 0;
-        padding: 1rem;
-        margin-bottom: 0.75rem;
+        background: var(--bg2); backdrop-filter: blur(12px);
+        border: 1px solid var(--b0); border-radius: 6px; padding: 1.1rem; margin-bottom: 0.8rem;
+        box-shadow: 0 4px 24px rgba(189,52,254,0.05), inset 0 1px 0 rgba(255,255,255,0.04);
+        transition: box-shadow 0.2s ease;
     }
+    .bb-report-card:hover { box-shadow: 0 4px 32px rgba(189,52,254,0.1), inset 0 1px 0 rgba(255,255,255,0.06); }
     .bb-report-date {
-        font-family: 'Playfair Display', serif;
+        font-family: 'Syne', sans-serif;
         font-size: 1rem;
-        color: var(--cream);
+        color: var(--t0);
         margin-bottom: 0.5rem;
     }
     .bb-report-row {
-        display: flex;
-        justify-content: space-between;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.7rem;
-        color: var(--cream-dim);
-        padding: 0.15rem 0;
-        border-bottom: 1px solid rgba(255,255,255,0.02);
+        display: flex; justify-content: space-between;
+        font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; color: var(--t1);
+        padding: 0.18rem 0; border-bottom: 1px solid rgba(255,255,255,0.025);
     }
-    .bb-report-val { color: var(--cream); }
+    .bb-report-val { color: var(--t0); }
+
+    /* ── HTML tables ── */
+    .bb-table-wrap {
+        overflow-x: auto; border-radius: 6px; border: 1px solid var(--b0);
+        margin-bottom: 0.8rem; background: var(--bg2); backdrop-filter: blur(10px);
+    }
+    .bb-table { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; }
+    .bb-table thead tr { border-bottom: 1px solid var(--b0); }
+    .bb-table th {
+        padding: 0.55rem 0.9rem; text-align: left; font-size: 0.54rem;
+        letter-spacing: 0.2em; text-transform: uppercase; color: var(--t2); font-weight: 500; white-space: nowrap;
+    }
+    .bb-table td { padding: 0.45rem 0.9rem; color: var(--t1); border-bottom: 1px solid rgba(255,255,255,0.02); }
+    .bb-table tr:last-child td { border-bottom: none; }
+    .bb-table tr:hover td { background: rgba(189,52,254,0.04); color: var(--t0); }
+    .bb-table .pos { color: #00FFB3 !important; }
+    .bb-table .neg { color: #FF3366 !important; }
+    .bb-table .neu { color: var(--t0); }
 
     /* ── Journal ── */
     .bb-journal-entry {
-        background: var(--bg-card);
-        border: 1px solid var(--border);
-        border-left: 2px solid var(--gold-border);
-        border-radius: 0;
-        padding: 1rem;
-        margin-bottom: 0.75rem;
+        background: var(--bg2); backdrop-filter: blur(8px);
+        border: 1px solid var(--b1); border-left: 2px solid var(--pu);
+        border-radius: 0 6px 6px 0; padding: 1rem; margin-bottom: 0.75rem;
+        box-shadow: -3px 0 18px rgba(189,52,254,0.08); transition: box-shadow 0.2s ease;
     }
+    .bb-journal-entry:hover { box-shadow: -3px 0 24px rgba(189,52,254,0.15); }
     .bb-journal-header { display: flex; justify-content: space-between; margin-bottom: 0.5rem; }
-    .bb-journal-date {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.62rem;
-        letter-spacing: 0.1em;
-        color: var(--cream-dim);
-    }
+    .bb-journal-date { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; letter-spacing: 0.1em; color: var(--t1); }
     .bb-journal-tag {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.58rem;
-        letter-spacing: 0.12em;
-        color: var(--gold);
-        text-transform: uppercase;
+        font-family: 'JetBrains Mono', monospace; font-size: 0.56rem;
+        letter-spacing: 0.14em; color: var(--mg); text-transform: uppercase;
+        text-shadow: 0 0 10px var(--mg-a);
     }
-    .bb-journal-body {
-        font-size: 0.85rem;
-        color: #9ca3af;
-        line-height: 1.7;
-        white-space: pre-wrap;
-    }
+    .bb-journal-body { font-size: 0.83rem; color: var(--t1); line-height: 1.75; white-space: pre-wrap; }
 
     /* ── Memory entries ── */
     .bb-memory-entry {
-        background: var(--bg-card);
-        border: 1px solid var(--border);
-        border-left: 2px solid rgba(201,168,76,0.25);
-        border-radius: 0;
-        padding: 0.7rem 0.9rem;
-        margin-bottom: 0.5rem;
+        background: var(--bg2); backdrop-filter: blur(8px);
+        border: 1px solid var(--b1); border-left: 2px solid rgba(189,52,254,0.3);
+        border-radius: 0 4px 4px 0; padding: 0.7rem 0.9rem; margin-bottom: 0.5rem;
     }
 
-    /* ── Advisor chat ── */
-    .bb-advisor-controls {
-        display: flex;
-        gap: 0.5rem;
-        justify-content: flex-end;
-        margin-bottom: 1.5rem;
-    }
-    .bb-advisor-btn {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.62rem;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        padding: 0.45rem 1rem;
-        border: 1px solid rgba(255,255,255,0.08);
-        background: transparent;
-        color: var(--cream-dim);
-        cursor: pointer;
-        transition: all 0.15s ease;
-    }
-    .bb-advisor-btn:hover { border-color: var(--gold-border); color: var(--cream); }
-    .bb-advisor-btn.save { border-color: var(--gold-border); color: var(--gold); }
-
-    /* ── Strip code block green styling from advisor responses ── */
+    /* ── Advisor ── */
     .bb-response code, .bb-response pre {
-        background: transparent !important;
-        color: inherit !important;
-        font-family: inherit !important;
-        font-size: inherit !important;
-        border: none !important;
-        padding: 0 !important;
+        background: transparent !important; color: inherit !important;
+        font-family: inherit !important; font-size: inherit !important;
+        border: none !important; padding: 0 !important;
     }
 
     /* ── Inputs ── */
     .stTextArea textarea {
-        background: var(--bg-card) !important;
-        border: 1px solid var(--gold-border) !important;
-        border-radius: 0 !important;
-        color: var(--cream) !important;
+        background: rgba(12,6,24,0.85) !important; border: 1px solid var(--b0) !important;
+        border-radius: 4px !important; color: var(--t0) !important;
+        font-family: 'JetBrains Mono', monospace !important; font-size: 0.83rem !important; resize: none !important;
+    }
+    .stTextArea textarea:focus { border-color: var(--mg) !important; box-shadow: 0 0 0 2px rgba(224,64,251,0.14) !important; }
+    .stTextInput input, .stNumberInput input {
+        background: rgba(12,6,24,0.85) !important; border: 1px solid var(--b0) !important;
+        border-radius: 4px !important; color: var(--t0) !important;
         font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.85rem !important;
-        resize: none !important;
     }
-    .stTextArea textarea:focus {
-        border-color: var(--gold) !important;
-        box-shadow: none !important;
+    .stTextInput input:focus, .stNumberInput input:focus {
+        border-color: var(--mg) !important; box-shadow: 0 0 0 2px rgba(224,64,251,0.14) !important;
     }
-    .stTextInput input {
-        background: var(--bg-card) !important;
-        border: 1px solid var(--gold-border) !important;
-        border-radius: 0 !important;
-        color: var(--cream) !important;
+    [data-testid="stSelectbox"] > div > div {
+        background: rgba(12,6,24,0.85) !important; border: 1px solid var(--b0) !important;
+        border-radius: 4px !important; color: var(--t0) !important;
     }
 
-    /* ── Tabs ── */
-    [data-testid="stTabs"] [role="tablist"] {
-        border-bottom: 1px solid var(--gold-border) !important;
-        gap: 0 !important;
-    }
+    /* ── Inner tabs ── */
+    [data-testid="stTabs"] [role="tablist"] { border-bottom: 1px solid var(--b0) !important; gap: 0 !important; }
     [data-testid="stTabs"] button[role="tab"] {
-        font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.62rem !important;
-        letter-spacing: 0.15em !important;
-        text-transform: uppercase !important;
-        color: var(--cream-dim) !important;
-        border-radius: 0 !important;
-        border-bottom: 1px solid transparent !important;
-        padding: 0.5rem 1.2rem !important;
-        background: transparent !important;
+        font-family: 'JetBrains Mono', monospace !important; font-size: 0.6rem !important;
+        letter-spacing: 0.16em !important; text-transform: uppercase !important;
+        color: var(--t1) !important; border-radius: 0 !important;
+        border-bottom: 2px solid transparent !important; padding: 0.5rem 1.2rem !important;
+        background: transparent !important; transition: all 0.15s ease !important;
     }
     [data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
-        color: var(--gold) !important;
-        border-bottom: 1px solid var(--gold) !important;
-        background: transparent !important;
+        color: var(--mg) !important; border-bottom: 2px solid var(--mg) !important;
+        text-shadow: 0 0 10px var(--mg-a) !important;
     }
 
+    /* ── Expander / Alert / Toast ── */
+    [data-testid="stExpander"] { border: 1px solid var(--b0) !important; border-radius: 4px !important; background: var(--bg2) !important; }
+    [data-testid="stAlert"] { border-radius: 4px !important; border: 1px solid var(--b0) !important; background: var(--bg2) !important; }
+    [data-testid="stToast"] { background: var(--bg1) !important; border: 1px solid var(--b0) !important; border-radius: 6px !important; }
+    [data-testid="stCaptionContainer"] p { color: var(--t2) !important; font-family: 'JetBrains Mono', monospace !important; font-size: 0.6rem !important; }
+    [data-testid="stDataFrame"] { border: 1px solid var(--b0) !important; border-radius: 6px !important; background: var(--bg2) !important; }
+
     /* ── Dividers ── */
-    hr { border-color: var(--gold-border) !important; }
+    hr { border-color: var(--b0) !important; }
 
     </style>
     """, unsafe_allow_html=True)
+
+
+# ── Table renderer ────────────────────────────────────────────────────────────
+
+def html_table(df: pd.DataFrame,
+               right_cols: list | None = None,
+               color_cols: list | None = None) -> None:
+    """Render a DataFrame as a styled glassmorphism HTML table."""
+    if df is None or df.empty:
+        st.caption("No data.")
+        return
+    right_cols = right_cols or []
+    color_cols = color_cols or []
+    cols = list(df.columns)
+
+    th = "".join(
+        f'<th style="text-align:{"right" if c in right_cols else "left"}">'
+        f'{_html.escape(str(c))}</th>'
+        for c in cols
+    )
+    trs = ""
+    for _, row in df.iterrows():
+        tds = ""
+        for c in cols:
+            val = row[c]
+            val_str = "—" if val is None or (isinstance(val, float) and math.isnan(val)) else str(val)
+            align = ' style="text-align:right"' if c in right_cols else ""
+            css_class = ""
+            if c in color_cols:
+                clean = val_str.replace("$", "").replace(",", "").replace("%", "").strip()
+                try:
+                    n = float(clean)
+                    css_class = ' class="pos"' if n > 0 else (' class="neg"' if n < 0 else "")
+                except ValueError:
+                    if val_str.startswith("-"):
+                        css_class = ' class="neg"'
+            tds += f'<td{css_class}{align}>{_html.escape(val_str)}</td>'
+        trs += f"<tr>{tds}</tr>"
+
+    st.markdown(
+        f'<div class="bb-table-wrap"><table class="bb-table">'
+        f'<thead><tr>{th}</tr></thead><tbody>{trs}</tbody>'
+        f'</table></div>',
+        unsafe_allow_html=True,
+    )
 
 
 # ── DB core ───────────────────────────────────────────────────────────────────
@@ -533,6 +522,16 @@ def init_db() -> None:
             db_execute(conn, "INSERT INTO accounts (name, account_type, is_debt, include_in_runway, starting_balance, sort_order) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT(name) DO NOTHING",
                        (a["name"], a["account_type"], a["is_debt"], a["include_in_runway"], 0.0, a["sort_order"]))
         conn.commit()
+        # Migration: add current_balance_override column if it doesn't exist yet
+        try:
+            if IS_POSTGRES:
+                db_execute(conn, "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS current_balance_override REAL DEFAULT NULL")
+            else:
+                db_execute(conn, "ALTER TABLE accounts ADD COLUMN current_balance_override REAL DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            try: conn.rollback()
+            except Exception: pass
     finally:
         conn.close()
 
@@ -570,7 +569,11 @@ def set_settings(settings: dict[str, Any]) -> None:
 def load_accounts() -> pd.DataFrame:
     conn = get_connection()
     try:
+        df = _cursor_to_df(db_execute(conn, "SELECT id, name, account_type, is_debt, include_in_runway, starting_balance, sort_order, current_balance_override FROM accounts ORDER BY sort_order, name"))
+    except Exception:
+        # Fallback if column doesn't exist yet (before migration runs)
         df = _cursor_to_df(db_execute(conn, "SELECT id, name, account_type, is_debt, include_in_runway, starting_balance, sort_order FROM accounts ORDER BY sort_order, name"))
+        df["current_balance_override"] = None
     finally:
         conn.close()
     if df.empty:
@@ -1232,6 +1235,14 @@ def build_account_balances(accounts_df, transactions_df, holdings_df, price_cach
         hv = enriched.groupby("account_id", dropna=False)["current_value"].sum().to_dict()
     for idx, row in balances.iterrows():
         balances.at[idx, "display_balance"] = hv[row["id"]] if row["account_type"] == "investment" and row["id"] in hv else row["current_balance"]
+    # Apply manual current-balance overrides (set in Settings)
+    if "current_balance_override" in balances.columns:
+        for idx, row in balances.iterrows():
+            ov = row["current_balance_override"]
+            if ov is not None and pd.notna(ov):
+                balances.at[idx, "current_balance"] = float(ov)
+                if str(row["account_type"]) != "investment":
+                    balances.at[idx, "display_balance"] = float(ov)
     return balances
 
 
@@ -1899,7 +1910,7 @@ def render_dashboard(settings, transactions_df, holdings_df, balances_df, price_
             "Balance": [format_currency(float(x)) for x in sorted_bal["display_balance"].tolist()],
             "Type": ["Debt" if int(r["is_debt"]) else str(r["account_type"]).title() for _, r in sorted_bal.iterrows()],
         })
-        st.dataframe(acct_display, use_container_width=True, hide_index=True)
+        html_table(acct_display, right_cols=["Balance"])
         st.subheader("Recent Money Moves")
         recent = transactions_df.head(8).copy() if not transactions_df.empty else pd.DataFrame()
         if recent.empty:
@@ -1907,8 +1918,8 @@ def render_dashboard(settings, transactions_df, holdings_df, balances_df, price_
         else:
             recent["date"] = pd.to_datetime(recent["date"]).dt.strftime("%Y-%m-%d")
             recent["amount"] = recent["amount"].map(format_currency)
-            st.dataframe(recent[["date", "description", "category", "amount", "account", "type", "to_account"]],
-                         use_container_width=True, hide_index=True)
+            html_table(recent[["date", "description", "category", "amount", "account", "type", "to_account"]],
+                       right_cols=["amount"], color_cols=["amount"])
     with right:
         reports = prepare_report_frames(transactions_df)
         if not reports["spending"].empty:
@@ -1932,7 +1943,7 @@ def render_dashboard(settings, transactions_df, holdings_df, balances_df, price_
             ("Spending", preview["spending_reserved"]), ("Crypto", preview["crypto_reserved"]),
             ("Taxable", preview.get("taxable_reserved", 0.0)), ("Roth IRA", preview.get("roth_reserved", 0.0)),
         ], columns=["Bucket", "Amount"])
-        st.dataframe(alloc_df.assign(Amount=alloc_df["Amount"].map(format_currency)), use_container_width=True, hide_index=True)
+        html_table(alloc_df.assign(Amount=alloc_df["Amount"].map(format_currency)), right_cols=["Amount"])
 
 
 def render_log_transaction(accounts_df: pd.DataFrame, transactions_df: pd.DataFrame) -> None:
@@ -2021,13 +2032,13 @@ def render_paycheck_allocation(settings, balances_df, food_metrics) -> None:
                       ("Taxable", allocation["taxable_reserved"]), ("Roth IRA", allocation["roth_reserved"])]
         alloc_df = pd.DataFrame(alloc_rows, columns=["Bucket", "Amount"])
         alloc_df["Share"] = alloc_df["Amount"].apply(lambda x: safe_div(x, allocation["paycheck_amount"]))
-        st.dataframe(alloc_df.assign(Amount=alloc_df["Amount"].map(format_currency), Share=alloc_df["Share"].map(format_percent)),
-                     use_container_width=True, hide_index=True)
+        html_table(alloc_df.assign(Amount=alloc_df["Amount"].map(format_currency), Share=alloc_df["Share"].map(format_percent)),
+                   right_cols=["Amount", "Share"])
         if allocation["debt_breakdown"]:
             st.subheader("Debt Split")
             dbd = pd.DataFrame(allocation["debt_breakdown"])
-            st.dataframe(dbd.assign(debt_balance=dbd["debt_balance"].map(format_currency), allocation=dbd["allocation"].map(format_currency))[["account","debt_balance","allocation"]],
-                         use_container_width=True, hide_index=True)
+            html_table(dbd.assign(debt_balance=dbd["debt_balance"].map(format_currency), allocation=dbd["allocation"].map(format_currency))[["account","debt_balance","allocation"]],
+                       right_cols=["debt_balance", "allocation"])
         if allocation["dca_targets"]:
             st.subheader("DCA Checklist — Execute Manually")
             for target in allocation["dca_targets"]:
@@ -2040,7 +2051,7 @@ def render_paycheck_allocation(settings, balances_df, food_metrics) -> None:
         display = history[["run_date","paycheck_amount","food_reserved","debt_reserved","savings_reserved","surplus_savings","spending_reserved","crypto_reserved","taxable_reserved","roth_reserved"]].copy()
         for col in display.columns:
             if col != "run_date": display[col] = display[col].map(format_currency)
-        st.dataframe(display, use_container_width=True, hide_index=True)
+        html_table(display)
 
 
 def render_investments(holdings_df, price_cache_df, accounts_df) -> None:
@@ -2068,16 +2079,16 @@ def render_investments(holdings_df, price_cache_df, accounts_df) -> None:
             with t1:
                 v = enriched[["display_name","account","quantity","latest_price","previous_close","tdy_pnl"]].copy()
                 v["latest_price"]=v["latest_price"].map(format_currency); v["previous_close"]=v["previous_close"].map(format_currency); v["tdy_pnl"]=v["tdy_pnl"].map(format_currency)
-                st.dataframe(v, use_container_width=True, hide_index=True)
+                html_table(v, right_cols=["latest_price","previous_close","tdy_pnl"], color_cols=["tdy_pnl"])
             with t2:
                 v = enriched[["display_name","account","amount_invested","current_value","total_pnl","total_pnl_pct"]].copy()
                 v["amount_invested"]=v["amount_invested"].map(format_currency); v["current_value"]=v["current_value"].map(format_currency)
                 v["total_pnl"]=v["total_pnl"].map(format_currency); v["total_pnl_pct"]=v["total_pnl_pct"].map(format_percent)
-                st.dataframe(v, use_container_width=True, hide_index=True)
+                html_table(v, right_cols=["amount_invested","current_value","total_pnl","total_pnl_pct"], color_cols=["total_pnl","total_pnl_pct"])
             with t3:
                 v = enriched[["display_name","symbol","account","latest_price","price_source","fetched_at"]].copy()
                 v["latest_price"]=v["latest_price"].map(format_currency)
-                st.dataframe(v, use_container_width=True, hide_index=True)
+                html_table(v, right_cols=["latest_price"])
             ac1, ac2 = st.columns(2)
             with ac1:
                 ba = enriched.groupby("account", as_index=False)["current_value"].sum()
@@ -2271,7 +2282,7 @@ def render_reconcile(transactions_df, accounts_df) -> None:
         m1, m2, m3 = st.columns(3)
         m1.metric("Total in Statement", len(results)); m2.metric("Matched", matched); m3.metric("Missing", missing)
         if missing > 0: st.warning(f"{missing} transaction(s) not in Black Book. Log them manually.")
-        st.dataframe(results, use_container_width=True, hide_index=True)
+        html_table(results)
         st.download_button("Export Reconciliation CSV", data=results.to_csv(index=False).encode("utf-8"),
                            file_name=f"reconcile_{selected_account}_{date.today()}.csv", mime="text/csv")
 
@@ -2789,6 +2800,32 @@ def render_settings(settings, accounts_df) -> None:
             finally:
                 conn.close()
             st.success("Settings saved."); st.rerun()
+    st.subheader("Current Balance Overrides")
+    st.caption("Override the transaction-computed balance when your actual balance differs from what's logged. Set to 0 to clear the override and revert to computed.")
+    with st.form("override_balances_form"):
+        ov_values: dict[int, float] = {}
+        ov_cols = st.columns(2)
+        combined_ov = sorted(
+            zip(accounts_df["sort_order"].tolist(), accounts_df["id"].tolist(),
+                accounts_df["name"].tolist(), accounts_df["current_balance_override"].tolist()),
+            key=lambda x: x[0]
+        )
+        for idx, (_, acct_id, acct_name, current_ov) in enumerate(combined_ov):
+            current_val = float(current_ov) if current_ov is not None and pd.notna(current_ov) else 0.0
+            ov_values[int(acct_id)] = ov_cols[idx % 2].number_input(
+                f"{acct_name}  (0 = use computed)", value=current_val, step=0.01, format="%.2f", key=f"ov_{idx}"
+            )
+        if st.form_submit_button("Save Overrides", type="primary"):
+            conn = get_connection()
+            try:
+                for acct_id, val in ov_values.items():
+                    override_val = float(val) if val != 0.0 else None
+                    db_execute(conn, "UPDATE accounts SET current_balance_override = %s WHERE id = %s", (override_val, int(acct_id)))
+                conn.commit()
+            finally:
+                conn.close()
+            st.success("Overrides saved."); st.rerun()
+
     st.subheader("Add New Account")
     with st.form("add_account_form"):
         a1, a2 = st.columns(2)
