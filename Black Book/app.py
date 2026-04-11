@@ -2357,13 +2357,28 @@ def render_journal() -> None:
             except Exception:
                 _mrow = None; _jrow = None
 
+            def _col(row, idx, name):
+                """Access row by name (dict cursor) or index (tuple cursor)."""
+                try:
+                    return row[name]
+                except (KeyError, TypeError):
+                    return row[idx]
+
             if _mrow:
-                st.markdown(f"**Last cycle:** {str(_mrow[0])[:10] if _mrow[0] else 'unknown'} &nbsp;·&nbsp; Questions batch #{_mrow[1] if _mrow[1] else '?'}")
+                _gd = _col(_mrow, 0, "generated_date")
+                _mid = _col(_mrow, 1, "id")
+                st.markdown(f"**Last cycle:** {str(_gd)[:10] if _gd else 'unknown'} &nbsp;·&nbsp; Questions batch #{_mid if _mid else '?'}")
             else:
                 st.markdown("**No cycles run yet.**")
 
-            if _jrow and _jrow[0] == "pending":
-                st.warning(f"Cycle queued — waiting for Meridian to pick it up. (Requested {str(_jrow[1])[:16]})")
+            if _jrow:
+                _jstatus = _col(_jrow, 0, "status")
+                _jreq = _col(_jrow, 1, "requested_at")
+            else:
+                _jstatus = None; _jreq = None
+
+            if _jstatus == "pending":
+                st.warning(f"Cycle queued — waiting for Meridian to pick it up. (Requested {str(_jreq)[:16]})")
             else:
                 if st.button("Run Meridian Cycle", type="primary", use_container_width=True):
                     try:
