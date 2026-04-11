@@ -4,6 +4,7 @@ Budget Black Book — Cloud Edition
 
 from __future__ import annotations
 
+import html as _html
 import json
 import math
 import os
@@ -11,7 +12,7 @@ import re
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
@@ -519,6 +520,8 @@ def init_db() -> None:
         f"CREATE TABLE IF NOT EXISTS advisor_conversations (id {serial} PRIMARY KEY {ai}, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
         # Meridian job queue — Black Book writes a row; Meridian polls and clears it
         f"CREATE TABLE IF NOT EXISTS meridian_jobs (id {serial} PRIMARY KEY {ai}, status TEXT NOT NULL DEFAULT 'pending', requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, started_at TEXT, completed_at TEXT, result TEXT)",
+        # Meridian vault snapshot — synced after each evolve cycle
+        f"CREATE TABLE IF NOT EXISTS meridian_notes (id {serial} PRIMARY KEY {ai}, note_id TEXT NOT NULL, title TEXT NOT NULL, stage TEXT NOT NULL, fitness REAL, maturity INTEGER, domains TEXT, body TEXT, cycle INTEGER, synced_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     ]
     conn = get_connection()
     try:
@@ -837,11 +840,12 @@ def report_exists(report_date: str) -> bool:
 
 
 def maybe_generate_yesterday_report(accounts_df, transactions_df, holdings_df, price_cache_df, settings) -> None:
-    yesterday = (date.today() - timedelta(days=1)).strftime(DATE_FMT)
+    _today = today_local()
+    yesterday = (_today - timedelta(days=1)).strftime(DATE_FMT)
     if report_exists(yesterday):
         return
     try:
-        tx_yesterday = transactions_df[pd.to_datetime(transactions_df["date"]).dt.date <= date.today() - timedelta(days=1)].copy() if not transactions_df.empty else transactions_df
+        tx_yesterday = transactions_df[pd.to_datetime(transactions_df["date"]).dt.date <= _today - timedelta(days=1)].copy() if not transactions_df.empty else transactions_df
         balances = build_account_balances(accounts_df, tx_yesterday, holdings_df, price_cache_df)
         food = build_food_metrics(tx_yesterday, settings)
         runway = build_runway(tx_yesterday, balances, food)
@@ -854,7 +858,7 @@ def maybe_generate_yesterday_report(accounts_df, transactions_df, holdings_df, p
             "food_spent": food["food_spent_today"], "food_surplus": food["current_carry_surplus"],
             "portfolio_value": float(enriched_h["current_value"].sum()) if not enriched_h.empty else 0.0,
             "portfolio_pnl": float(enriched_h["total_pnl"].sum()) if not enriched_h.empty else 0.0,
-            "txn_count": len(tx_yesterday[pd.to_datetime(tx_yesterday["date"]).dt.date == date.today() - timedelta(days=1)]) if not tx_yesterday.empty else 0,
+            "txn_count": len(tx_yesterday[pd.to_datetime(tx_yesterday["date"]).dt.date == _today - timedelta(days=1)]) if not tx_yesterday.empty else 0,
             "accounts": {str(r["name"]): round(float(r["display_balance"]), 2) for _, r in balances.iterrows()},
         }
         save_daily_report(yesterday, snapshot)
@@ -906,7 +910,7 @@ def save_advisor_memory_to_db(body: str) -> None:
     conn = get_connection()
     try:
         db_execute(conn, "INSERT INTO advisor_memory (memory_date, body) VALUES (%s, %s)",
-                   (date.today().strftime(DATE_FMT), body.strip()))
+                   (today_local().strftime(DATE_FMT), body.strip()))
         conn.commit()
     finally:
         conn.close()
@@ -1233,7 +1237,7 @@ def build_account_balances(accounts_df, transactions_df, holdings_df, price_cach
 
 def build_food_metrics(transactions_df: pd.DataFrame, settings: dict[str, str]) -> dict[str, Any]:
     db = get_setting_float(settings, "daily_food_budget")
-    today = date.today(); ws = today - timedelta(days=today.weekday())
+    today = today_local(); ws = today - timedelta(days=today.weekday())
     food_df = transactions_df.loc[transactions_df["category"].eq("Food")].copy() if not transactions_df.empty else pd.DataFrame()
     ts = ws_spent = tfs = cc = ls = adf = 0.0; ad = 0
     if not food_df.empty:
@@ -1264,7 +1268,7 @@ def build_runway(transactions_df, balances_df, food_metrics) -> dict[str, float]
     else:
         sd = transactions_df.loc[transactions_df["type"].eq("Expense")].copy()
         sd["date"] = pd.to_datetime(sd["date"]).dt.date
-        td = sd.loc[sd["date"] >= date.today() - timedelta(days=29)]
+        td = sd.loc[sd["date"] >= today_local() - timedelta(days=29)]
         avg = float(td["amount"].sum()) / 30.0 if not td.empty else food_metrics["avg_daily_food_spend"]
     return {"liquid_cash": lc, "avg_daily_spending": avg, "runway_days": safe_div(lc, avg)}
 
@@ -1287,7 +1291,7 @@ def build_signals(balances_df, debt_summary, food_metrics, runway, settings) -> 
     checking = float(balances_df.loc[balances_df["name"].eq("Checking"), "display_balance"].sum())
     due_day = int(get_setting_float(settings, "due_day") or 27)
     stmt_day = int(get_setting_float(settings, "statement_day") or 2)
-    today = date.today()
+    today = today_local()
     dd = date(today.year, today.month, min(due_day, 28))
     if today.day > due_day:
         nm = today.replace(day=28) + timedelta(days=4); dd = date(nm.year, nm.month, min(due_day, 28))
@@ -1313,7 +1317,7 @@ def compute_paycheck_allocation(paycheck_amount: float, settings: dict[str, str]
                                  debt_df: pd.DataFrame, food_surplus: float = 0.0) -> dict[str, Any]:
     ppd = int(get_setting_float(settings, "pay_period_days") or 14)
     due_day = int(get_setting_float(settings, "due_day") or 27)
-    today = date.today()
+    today = today_local()
     due_date = date(today.year, today.month, min(due_day, 28))
     if today.day > due_day:
         nm = today.replace(day=28) + timedelta(days=4)
@@ -1437,8 +1441,9 @@ def get_google_calendar_events() -> list[dict]:
                             client_id=client_id, client_secret=client_secret,
                             scopes=["https://www.googleapis.com/auth/calendar.readonly"])
         service = google_build("calendar", "v3", credentials=creds, cache_discovery=False)
-        now_iso = datetime.utcnow().isoformat() + "Z"
-        week_end = (datetime.utcnow() + timedelta(days=7)).isoformat() + "Z"
+        _utcnow = datetime.now(timezone.utc)
+        now_iso = _utcnow.strftime("%Y-%m-%dT%H:%M:%SZ")
+        week_end = (_utcnow + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
         result = service.events().list(calendarId="primary", timeMin=now_iso, timeMax=week_end,
                                         maxResults=20, singleEvents=True, orderBy="startTime").execute()
         return result.get("items", [])
@@ -1563,7 +1568,7 @@ def advisor_get_spending_by_category(days: int = 30) -> list[dict]:
     df = load_transactions()
     if df.empty:
         return []
-    cutoff = date.today() - timedelta(days=days)
+    cutoff = today_local() - timedelta(days=days)
     df["date"] = pd.to_datetime(df["date"]).dt.date
     df = df[(df["type"] == "Expense") & (df["date"] >= cutoff)]
     if df.empty:
@@ -1973,7 +1978,7 @@ def render_log_transaction(accounts_df: pd.DataFrame, transactions_df: pd.DataFr
                 <div style="background:#0d1117;border:1px solid {C_RED}33;border-radius:2px;padding:0.8rem 1rem;margin:0.5rem 0">
                 <div style="font-family:JetBrains Mono,monospace;font-size:0.7rem;color:#6b7280">SELECTED</div>
                 <div style="font-family:JetBrains Mono,monospace;font-size:0.85rem;color:#e2e8f0;margin-top:0.3rem">
-                {row['date']} · {row['description']} · {format_currency(float(row['amount']))} · {row['account']}
+                {_html.escape(str(row['date']))} · {_html.escape(str(row['description']))} · {format_currency(float(row['amount']))} · {_html.escape(str(row['account']))}
                 </div></div>""", unsafe_allow_html=True)
                 if st.checkbox("I confirm I want to permanently delete this transaction"):
                     if st.button("Delete Transaction", type="primary"):
@@ -1984,9 +1989,11 @@ def render_paycheck_allocation(settings, balances_df, food_metrics) -> None:
     st.markdown('<div class="bb-title">Paycheck Allocation</div>', unsafe_allow_html=True)
     st.markdown('<div class="bb-subtitle">Break down your next deposit</div>', unsafe_allow_html=True)
     debt_df = build_debt_summary(balances_df)["by_account"]
+    _last_snap = load_allocation_snapshots(limit=1)
+    _default_paycheck = float(_last_snap.iloc[0]["paycheck_amount"]) if not _last_snap.empty else 580.0
     c1, c2 = st.columns([0.9, 1.1])
     with c1:
-        paycheck_amount = st.number_input("Paycheck Amount", min_value=0.0, value=580.0, step=10.0, format="%.2f")
+        paycheck_amount = st.number_input("Paycheck Amount", min_value=0.0, value=_default_paycheck, step=10.0, format="%.2f")
         food_surplus = food_metrics.get("current_carry_surplus", 0.0)
         allocation = compute_paycheck_allocation(float(paycheck_amount), settings, debt_df, food_surplus=food_surplus)
         if allocation["payment_due_this_period"]:
@@ -2234,11 +2241,9 @@ def render_reconcile(transactions_df, accounts_df) -> None:
     st.markdown('<div class="bb-title">Reconcile</div>', unsafe_allow_html=True)
     st.markdown('<div class="bb-subtitle">Capital One statement verification</div>', unsafe_allow_html=True)
     st.markdown("Upload a Capital One CSV. Black Book compares it against your log. **Nothing changes automatically.**")
-    cap_one_accounts = ["Checking", "Savor", "Venture"]
-    existing_accounts = [str(x) for x in accounts_df["name"].tolist()]
-    available = [a for a in cap_one_accounts if a in existing_accounts]
+    available = [str(x) for x in accounts_df.sort_values("sort_order")["name"].tolist()]
     if not available:
-        st.warning("No Capital One accounts found."); return
+        st.warning("No accounts found."); return
     c1, c2 = st.columns([1, 2])
     selected_account = c1.selectbox("Account to reconcile", available)
     uploaded = c2.file_uploader("Upload Capital One CSV", type=["csv"])
@@ -2272,6 +2277,7 @@ def render_journal() -> None:
         # ── Meridian adaptive questions (falls back to static if none available) ──
         _meridian_qs = []
         if IS_POSTGRES:
+            _conn = None
             try:
                 _conn = get_connection()
                 _cur = _conn.cursor()
@@ -2280,14 +2286,16 @@ def render_journal() -> None:
                 )
                 _row = _cur.fetchone()
                 if _row:
-                    # Support dict cursor (keyed) and tuple cursor (indexed)
                     _raw = _row["questions"] if isinstance(_row, dict) else _row[0]
                     if isinstance(_raw, str):
                         _raw = json.loads(_raw)
                     _meridian_qs = [q.get("question", "") for q in _raw if q.get("question")]
-                _cur.close(); _conn.close()
+                _cur.close()
             except Exception:
                 pass
+            finally:
+                if _conn:
+                    _conn.close()
 
         if _meridian_qs:
             _qs_html = "".join(
@@ -2333,12 +2341,12 @@ def render_journal() -> None:
                 st.markdown(f"""
                 <div class="bb-journal-entry">
                 <div class="bb-journal-header">
-                    <span class="bb-journal-date">{display_date}</span>
-                    <span class="bb-journal-tag">{row['tag']}</span>
+                    <span class="bb-journal-date">{_html.escape(display_date)}</span>
+                    <span class="bb-journal-tag">{_html.escape(str(row['tag']))}</span>
                 </div>
-                <div class="bb-journal-body">{str(row['body'])}</div>
+                <div class="bb-journal-body">{_html.escape(str(row['body']))}</div>
                 </div>""", unsafe_allow_html=True)
-                with st.expander("", expanded=False):
+                with st.expander("Options", expanded=False):
                     if st.checkbox(f"Delete this entry", key=f"jdel_confirm_{entry_id}"):
                         if st.button("Delete", key=f"jdel_btn_{entry_id}", type="primary"):
                             delete_journal_entry(entry_id); st.rerun()
@@ -2353,20 +2361,25 @@ def render_journal() -> None:
                 except (KeyError, TypeError): return row[idx]
 
             # ── Load all Meridian data ──────────────────────────────────────
-            try:
-                _mc = get_connection(); _mcur = _mc.cursor()
-                _mcur.execute("SELECT generated_date, id FROM meridian_questions ORDER BY id DESC LIMIT 1")
-                _mrow = _mcur.fetchone()
-                _mcur.execute("SELECT status, requested_at FROM meridian_jobs ORDER BY id DESC LIMIT 1")
-                _jrow = _mcur.fetchone()
-                _mcur.execute(
-                    "SELECT note_id, title, stage, fitness, maturity, domains, body, cycle "
-                    "FROM meridian_notes ORDER BY fitness DESC NULLS LAST"
-                )
-                _notes_raw = _mcur.fetchall()
-                _mcur.close(); _mc.close()
-            except Exception:
-                _mrow = None; _jrow = None; _notes_raw = []
+            _mc = None
+            with st.spinner("Loading vault..."):
+                try:
+                    _mc = get_connection(); _mcur = _mc.cursor()
+                    _mcur.execute("SELECT generated_date, id FROM meridian_questions ORDER BY id DESC LIMIT 1")
+                    _mrow = _mcur.fetchone()
+                    _mcur.execute("SELECT status, requested_at FROM meridian_jobs ORDER BY id DESC LIMIT 1")
+                    _jrow = _mcur.fetchone()
+                    _mcur.execute(
+                        "SELECT note_id, title, stage, fitness, maturity, domains, body, cycle "
+                        "FROM meridian_notes ORDER BY fitness DESC NULLS LAST"
+                    )
+                    _notes_raw = _mcur.fetchall()
+                    _mcur.close()
+                except Exception:
+                    _mrow = None; _jrow = None; _notes_raw = []
+                finally:
+                    if _mc:
+                        _mc.close()
 
             # ── Cycle stats bar ────────────────────────────────────────────
             _gd = _col(_mrow, 0, "generated_date") if _mrow else None
@@ -2411,16 +2424,20 @@ def render_journal() -> None:
                     st.caption(f"Requested {str(_jreq)[:16]}")
                 else:
                     if st.button("Run Cycle", type="primary", use_container_width=True):
+                        _wc = None
                         try:
                             _wc = get_connection(); _wcur = _wc.cursor()
                             _wcur.execute(
                                 "INSERT INTO meridian_jobs (status, requested_at) VALUES ('pending', %s)",
                                 (datetime.now().isoformat(),)
                             )
-                            _wc.commit(); _wcur.close(); _wc.close()
+                            _wc.commit(); _wcur.close()
                             st.success("Queued. Run `python evolve.py evolve`.")
                         except Exception as e:
                             st.error(f"Error: {e}")
+                        finally:
+                            if _wc:
+                                _wc.close()
             with _info_col:
                 if _gd:
                     st.caption(f"Last questions: {str(_gd)[:10]}")
@@ -2485,7 +2502,6 @@ def render_journal() -> None:
                     unsafe_allow_html=True
                 )
 
-                import re as _re
                 # Build title → id map (lowercase for fuzzy match)
                 _tid_map = {n["title"].lower(): n["id"] for n in _notes}
                 _vis_nodes = []
@@ -2498,11 +2514,11 @@ def render_journal() -> None:
                         "label": _n["title"][:35],
                         "color": _STAGE_COLORS.get(_n["stage"], "#4A90D9"),
                         "size": 6 + _fit_val / 12,
-                        "title": f"<b>{_n['title']}</b><br>Stage: {_n['stage']}<br>Fitness: {_n['fitness'] or '?'}<br>{'<br>'.join(d for d in _n['domains'] if d)[:120]}",
+                        "title": f"<b>{_html.escape(_n['title'])}</b><br>Stage: {_n['stage']}<br>Fitness: {_n['fitness'] or '?'}<br>{'<br>'.join(_html.escape(d) for d in _n['domains'] if d)[:120]}",
                         "font": {"size": 10},
                     })
                     if _n["body"]:
-                        for _lnk in _re.findall(r'\[\[([^\]|#]+?)(?:\|[^\]]+)?\]\]', _n["body"]):
+                        for _lnk in re.findall(r'\[\[([^\]|#]+?)(?:\|[^\]]+)?\]\]', _n["body"]):
                             _target = _tid_map.get(_lnk.strip().lower())
                             if _target and _target != _n["id"]:
                                 _ek = tuple(sorted([_n["id"], _target]))
@@ -2531,6 +2547,8 @@ new vis.Network(document.getElementById('net'),{{nodes:nodes,edges:edges}},{{
   interaction:{{hover:true,tooltipDelay:80,navigationButtons:false,zoomView:true}}
 }});
 </script></body></html>"""
+                if not _vis_edges:
+                    st.caption("No connections yet — graph fills in as seeds evolve into sprouts and trees with wikilinks between them.")
                 st.components.v1.html(_graph_html, height=580, scrolling=False)
 
 
@@ -2817,7 +2835,9 @@ def main() -> None:
     balances_df = build_account_balances(accounts_df, transactions_df, holdings_df, price_cache_df)
     food_metrics = build_food_metrics(transactions_df, settings)
 
-    maybe_generate_yesterday_report(accounts_df, transactions_df, holdings_df, price_cache_df, settings)
+    if not st.session_state.get("_yesterday_report_done"):
+        maybe_generate_yesterday_report(accounts_df, transactions_df, holdings_df, price_cache_df, settings)
+        st.session_state["_yesterday_report_done"] = True
 
     NAV_ITEMS = ["Dashboard", "Log Transaction", "Paycheck Allocation",
                  "Investments", "Reports", "Reconcile", "Journal", "Agenda", "Advisor", "Settings"]
