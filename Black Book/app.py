@@ -40,10 +40,10 @@ except ImportError:
     _PSYCOPG2_AVAILABLE = False
 
 try:
-    import google.generativeai as genai
-    _GENAI_AVAILABLE = True
+    from groq import Groq as _GroqClient
+    _GROQ_AVAILABLE = True
 except ImportError:
-    _GENAI_AVAILABLE = False
+    _GROQ_AVAILABLE = False
 
 try:
     from google.oauth2.credentials import Credentials
@@ -1648,72 +1648,65 @@ def advisor_log_transaction(date_str: str, description: str, category: str, amou
 # ── Advisor tools schema ──────────────────────────────────────────────────────
 
 def _build_advisor_tools():
-    if not _GENAI_AVAILABLE:
-        return None
-    try:
-        from google.generativeai.types import Tool, FunctionDeclaration
-        declarations = [
-            FunctionDeclaration(
-                name="advisor_get_account_balances",
-                description="Get current balances for all accounts including cash, credit cards, and investments.",
-                parameters={"type": "object", "properties": {}, "required": []},
-            ),
-            FunctionDeclaration(
-                name="advisor_get_recent_transactions",
-                description="Get recent transactions, optionally filtered by category or account name.",
-                parameters={"type": "object", "properties": {
-                    "limit": {"type": "integer", "description": "Max number of transactions to return (default 20)"},
-                    "category": {"type": "string", "description": "Filter by category name (e.g. Food, Bills)"},
-                    "account": {"type": "string", "description": "Filter by account name (e.g. Checking, Savor)"},
-                }, "required": []},
-            ),
-            FunctionDeclaration(
-                name="advisor_get_spending_by_category",
-                description="Get total spending grouped by category for the last N days.",
-                parameters={"type": "object", "properties": {
-                    "days": {"type": "integer", "description": "Number of days to look back (default 30)"},
-                }, "required": []},
-            ),
-            FunctionDeclaration(
-                name="advisor_get_food_metrics",
-                description="Get current food budget metrics including daily spend, weekly spend, and carry surplus.",
-                parameters={"type": "object", "properties": {}, "required": []},
-            ),
-            FunctionDeclaration(
-                name="advisor_get_portfolio_summary",
-                description="Get current investment portfolio with current value, PnL, and today's PnL per holding.",
-                parameters={"type": "object", "properties": {}, "required": []},
-            ),
-            FunctionDeclaration(
-                name="advisor_get_net_worth_history",
-                description="Get historical net worth, debt, and portfolio value from daily reports.",
-                parameters={"type": "object", "properties": {
-                    "limit": {"type": "integer", "description": "Number of days to return (default 30)"},
-                }, "required": []},
-            ),
-            FunctionDeclaration(
-                name="advisor_get_paycheck_allocation",
-                description="Compute paycheck allocation breakdown for a given paycheck amount.",
-                parameters={"type": "object", "properties": {
-                    "amount": {"type": "number", "description": "Paycheck amount in dollars"},
-                }, "required": ["amount"]},
-            ),
-            FunctionDeclaration(
-                name="advisor_log_transaction",
-                description="Log a new transaction to the database on behalf of the user.",
-                parameters={"type": "object", "properties": {
-                    "date_str": {"type": "string", "description": "Date in YYYY-MM-DD format"},
-                    "description": {"type": "string", "description": "Transaction description"},
-                    "category": {"type": "string", "description": "Category (Food, Bills, Income, etc.)"},
-                    "amount": {"type": "number", "description": "Amount in dollars (positive)"},
-                    "account_name": {"type": "string", "description": "Account name (e.g. Checking, Savor)"},
-                    "tx_type": {"type": "string", "description": "Type: Expense, Income, or Transfer"},
-                }, "required": ["date_str", "description", "category", "amount", "account_name", "tx_type"]},
-            ),
-        ]
-        return Tool(function_declarations=declarations)
-    except Exception:
-        return None
+    return [
+        {"type": "function", "function": {
+            "name": "advisor_get_account_balances",
+            "description": "Get current balances for all accounts including cash, credit cards, and investments.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        }},
+        {"type": "function", "function": {
+            "name": "advisor_get_recent_transactions",
+            "description": "Get recent transactions, optionally filtered by category or account name.",
+            "parameters": {"type": "object", "properties": {
+                "limit": {"type": "integer", "description": "Max number of transactions to return (default 20)"},
+                "category": {"type": "string", "description": "Filter by category name (e.g. Food, Bills)"},
+                "account": {"type": "string", "description": "Filter by account name (e.g. Checking, Savor)"},
+            }, "required": []},
+        }},
+        {"type": "function", "function": {
+            "name": "advisor_get_spending_by_category",
+            "description": "Get total spending grouped by category for the last N days.",
+            "parameters": {"type": "object", "properties": {
+                "days": {"type": "integer", "description": "Number of days to look back (default 30)"},
+            }, "required": []},
+        }},
+        {"type": "function", "function": {
+            "name": "advisor_get_food_metrics",
+            "description": "Get current food budget metrics including daily spend, weekly spend, and carry surplus.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        }},
+        {"type": "function", "function": {
+            "name": "advisor_get_portfolio_summary",
+            "description": "Get current investment portfolio with current value, PnL, and today's PnL per holding.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        }},
+        {"type": "function", "function": {
+            "name": "advisor_get_net_worth_history",
+            "description": "Get historical net worth, debt, and portfolio value from daily reports.",
+            "parameters": {"type": "object", "properties": {
+                "limit": {"type": "integer", "description": "Number of days to return (default 30)"},
+            }, "required": []},
+        }},
+        {"type": "function", "function": {
+            "name": "advisor_get_paycheck_allocation",
+            "description": "Compute paycheck allocation breakdown for a given paycheck amount.",
+            "parameters": {"type": "object", "properties": {
+                "amount": {"type": "number", "description": "Paycheck amount in dollars"},
+            }, "required": ["amount"]},
+        }},
+        {"type": "function", "function": {
+            "name": "advisor_log_transaction",
+            "description": "Log a new transaction to the database on behalf of the user.",
+            "parameters": {"type": "object", "properties": {
+                "date_str": {"type": "string", "description": "Date in YYYY-MM-DD format"},
+                "description": {"type": "string", "description": "Transaction description"},
+                "category": {"type": "string", "description": "Category (Food, Bills, Income, etc.)"},
+                "amount": {"type": "number", "description": "Amount in dollars (positive)"},
+                "account_name": {"type": "string", "description": "Account name (e.g. Checking, Savor)"},
+                "tx_type": {"type": "string", "description": "Type: Expense, Income, or Transfer"},
+            }, "required": ["date_str", "description", "category", "amount", "account_name", "tx_type"]},
+        }},
+    ]
 
 
 _ADVISOR_TOOL_DISPATCH = {
@@ -1730,13 +1723,11 @@ _ADVISOR_TOOL_DISPATCH = {
 
 def ask_advisor(question: str, context: str, conversation_history: list) -> tuple[str, list[str]]:
     """Returns (response_text, tools_used_list)."""
-    if not _GENAI_AVAILABLE:
-        return "google-generativeai not installed. Add it to requirements.txt.", []
-    api_key = st.secrets.get("GOOGLE_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")
+    if not _GROQ_AVAILABLE:
+        return "groq package not installed. Add it to requirements.txt.", []
+    api_key = st.secrets.get("GROQ_API_KEY", "") or os.environ.get("GROQ_API_KEY", "")
     if not api_key:
-        return "GOOGLE_API_KEY not found in secrets.", []
-
-    genai.configure(api_key=api_key)
+        return "GROQ_API_KEY not found in secrets.", []
 
     context_file = ""
     try:
@@ -1768,61 +1759,74 @@ You have tools available to fetch live financial data from the database — acco
 
 Respond the way you'd talk to someone you know well. No structure for structure's sake. No bullet points. No filler opener. Start with the actual point. If the answer is one sentence, one sentence. If it needs more room, use it. Reference his real numbers when they matter. Say what the data actually shows, including what he probably doesn't want to hear. Never use backtick formatting, code blocks, or markdown syntax. Write in plain prose only."""
 
-    history = []
+    messages: list[dict] = [{"role": "system", "content": system_prompt}]
     for msg in conversation_history[-10:]:
-        role = "user" if msg["role"] == "user" else "model"
-        history.append({"role": role, "parts": [msg["content"]]})
+        role = "user" if msg["role"] == "user" else "assistant"
+        messages.append({"role": role, "content": msg["content"]})
+    messages.append({"role": "user", "content": question})
 
+    tools = _build_advisor_tools()
     tools_used: list[str] = []
-    advisor_tool = _build_advisor_tools()
+    client = _GroqClient(api_key=api_key)
+    assistant_msg = None
 
     try:
-        model = genai.GenerativeModel(
-            model_name="gemini-2.0-flash-lite",
-            system_instruction=system_prompt,
-            tools=[advisor_tool] if advisor_tool else [],
-        )
-        chat = model.start_chat(history=history)
-        response = chat.send_message(question)
+        for _ in range(6):
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                max_tokens=2048,
+            )
+            assistant_msg = response.choices[0].message
 
-        # Tool-calling loop — max 5 iterations
-        for _ in range(5):
-            fn_calls = [p for p in response.parts if hasattr(p, "function_call") and p.function_call.name]
-            if not fn_calls:
+            if not assistant_msg.tool_calls:
                 break
-            tool_results = []
-            for part in fn_calls:
-                fn_name = part.function_call.name
-                fn_args = dict(part.function_call.args) if part.function_call.args else {}
+
+            # Append assistant turn with tool calls
+            messages.append({
+                "role": "assistant",
+                "content": assistant_msg.content,
+                "tool_calls": [
+                    {"id": tc.id, "type": "function",
+                     "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                    for tc in assistant_msg.tool_calls
+                ],
+            })
+
+            # Execute each tool and append results
+            for tc in assistant_msg.tool_calls:
+                fn_name = tc.function.name
+                try:
+                    fn_args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                except Exception:
+                    fn_args = {}
                 tools_used.append(fn_name)
                 try:
                     result = _ADVISOR_TOOL_DISPATCH[fn_name](fn_args) if fn_name in _ADVISOR_TOOL_DISPATCH else {"error": f"Unknown tool: {fn_name}"}
                 except Exception as exc:
                     result = {"error": str(exc)}
-                tool_results.append(
-                    genai.protos.Part(
-                        function_response=genai.protos.FunctionResponse(
-                            name=fn_name,
-                            response={"result": json.dumps(result, default=str)},
-                        )
-                    )
-                )
-            response = chat.send_message(tool_results)
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": json.dumps(result, default=str),
+                })
 
-        text = response.text if hasattr(response, "text") else ""
+        text = (assistant_msg.content or "") if assistant_msg else ""
         return strip_thinking(text), tools_used
     except Exception as e:
         return f"Error: {str(e)}", tools_used
 
 
 def extract_and_save_memory(conversation_history: list) -> str:
-    if not _GENAI_AVAILABLE or len(conversation_history) < 2:
+    if not _GROQ_AVAILABLE or len(conversation_history) < 2:
         return "Nothing to save."
-    api_key = st.secrets.get("GOOGLE_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")
+    api_key = st.secrets.get("GROQ_API_KEY", "") or os.environ.get("GROQ_API_KEY", "")
     if not api_key:
         return "No API key."
     try:
-        genai.configure(api_key=api_key)
+        client = _GroqClient(api_key=api_key)
         convo_text = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in conversation_history[-10:])
         prompt = f"""Extract the key points from this conversation worth remembering long term.
 Focus on: new goals mentioned, decisions made, patterns identified, anything said about life or systems not already in journals or financial data.
@@ -1831,9 +1835,12 @@ If nothing significant was discussed, respond with exactly: NOTHING_TO_SAVE
 
 CONVERSATION:
 {convo_text}"""
-        model = genai.GenerativeModel(model_name="gemini-2.0-flash-lite")
-        response = model.generate_content(prompt)
-        summary = strip_thinking(response.text.strip())
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=512,
+        )
+        summary = strip_thinking(response.choices[0].message.content.strip())
         if summary and summary != "NOTHING_TO_SAVE":
             save_advisor_memory_to_db(summary)
             return "Memory saved."
@@ -2583,10 +2590,10 @@ def render_agenda() -> None:
 def render_advisor(transactions_df, balances_df, holdings_df, price_cache_df, settings, food_metrics) -> None:
     st.markdown('<div class="bb-title">Advisor</div>', unsafe_allow_html=True)
     st.markdown('<div class="bb-subtitle">Your private financial advisor</div>', unsafe_allow_html=True)
-    if not _GENAI_AVAILABLE:
-        st.error("Add `google-generativeai` to requirements.txt and redeploy."); return
-    if not st.secrets.get("GOOGLE_API_KEY", ""):
-        st.error("Add GOOGLE_API_KEY to Streamlit secrets."); return
+    if not _GROQ_AVAILABLE:
+        st.error("Add `groq` to requirements.txt and redeploy."); return
+    if not st.secrets.get("GROQ_API_KEY", ""):
+        st.error("Add GROQ_API_KEY to Streamlit secrets."); return
 
     # ── Session state init ────────────────────────────────────────────────────
     if "advisor_history" not in st.session_state:
