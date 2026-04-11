@@ -2476,6 +2476,63 @@ def render_journal() -> None:
                             if _n["body"]:
                                 st.markdown(_n["body"][:1500])
 
+                # ── Graph view ─────────────────────────────────────────────
+                st.markdown("---")
+                st.markdown(
+                    '<div style="font-family:JetBrains Mono,monospace;font-size:0.65rem;'
+                    'letter-spacing:0.15em;text-transform:uppercase;color:#6b7280;'
+                    'margin-bottom:0.6rem">Graph View</div>',
+                    unsafe_allow_html=True
+                )
+
+                import re as _re
+                # Build title → id map (lowercase for fuzzy match)
+                _tid_map = {n["title"].lower(): n["id"] for n in _notes}
+                _vis_nodes = []
+                _vis_edges = []
+                _edge_set = set()
+                for _n in _notes:
+                    _fit_val = _n["fitness"] or 30
+                    _vis_nodes.append({
+                        "id": _n["id"],
+                        "label": _n["title"][:35],
+                        "color": _STAGE_COLORS.get(_n["stage"], "#4A90D9"),
+                        "size": 6 + _fit_val / 12,
+                        "title": f"<b>{_n['title']}</b><br>Stage: {_n['stage']}<br>Fitness: {_n['fitness'] or '?'}<br>{'<br>'.join(d for d in _n['domains'] if d)[:120]}",
+                        "font": {"size": 10},
+                    })
+                    if _n["body"]:
+                        for _lnk in _re.findall(r'\[\[([^\]|#]+?)(?:\|[^\]]+)?\]\]', _n["body"]):
+                            _target = _tid_map.get(_lnk.strip().lower())
+                            if _target and _target != _n["id"]:
+                                _ek = tuple(sorted([_n["id"], _target]))
+                                if _ek not in _edge_set:
+                                    _edge_set.add(_ek)
+                                    _vis_edges.append({"from": _n["id"], "to": _target})
+
+                _nodes_json = json.dumps(_vis_nodes)
+                _edges_json = json.dumps(_vis_edges)
+                _graph_html = f"""<!DOCTYPE html>
+<html><head>
+<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<style>
+  body{{margin:0;background:#0d1117;overflow:hidden}}
+  #net{{width:100%;height:560px;background:#0d1117}}
+  .vis-tooltip{{background:#161b22!important;border:1px solid #30363d!important;color:#c9d1d9!important;font-family:monospace!important;font-size:11px!important;border-radius:4px!important;padding:6px 10px!important}}
+</style></head><body>
+<div id="net"></div>
+<script>
+var nodes=new vis.DataSet({_nodes_json});
+var edges=new vis.DataSet({_edges_json});
+new vis.Network(document.getElementById('net'),{{nodes:nodes,edges:edges}},{{
+  nodes:{{shape:'dot',font:{{color:'#8b949e',size:10,face:'monospace'}},borderWidth:0,opacity:0.9}},
+  edges:{{color:{{color:'#30363d',opacity:0.5}},width:1,smooth:{{type:'continuous'}}}},
+  physics:{{stabilization:{{iterations:200}},barnesHut:{{gravitationalConstant:-3500,springLength:90,damping:0.12}}}},
+  interaction:{{hover:true,tooltipDelay:80,navigationButtons:false,zoomView:true}}
+}});
+</script></body></html>"""
+                st.components.v1.html(_graph_html, height=580, scrolling=False)
+
 
 def render_agenda() -> None:
     st.markdown('<div class="bb-title">Agenda</div>', unsafe_allow_html=True)
