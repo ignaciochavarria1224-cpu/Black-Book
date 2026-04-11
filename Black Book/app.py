@@ -12,6 +12,16 @@ import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
+
+TZ_LOCAL = ZoneInfo("America/New_York")
+
+def today_local() -> date:
+    """Current date in Eastern time (works correctly on UTC Streamlit Cloud servers)."""
+    return datetime.now(tz=TZ_LOCAL).date()
 from pathlib import Path
 from typing import Any
 
@@ -507,6 +517,8 @@ def init_db() -> None:
         f"CREATE TABLE IF NOT EXISTS advisor_memory (id {serial} PRIMARY KEY {ai}, memory_date TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
         # Advisor conversation history
         f"CREATE TABLE IF NOT EXISTS advisor_conversations (id {serial} PRIMARY KEY {ai}, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        # Meridian job queue — Black Book writes a row; Meridian polls and clears it
+        f"CREATE TABLE IF NOT EXISTS meridian_jobs (id {serial} PRIMARY KEY {ai}, status TEXT NOT NULL DEFAULT 'pending', requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, started_at TEXT, completed_at TEXT, result TEXT)",
     ]
     conn = get_connection()
     try:
@@ -1492,7 +1504,7 @@ def reconcile_transactions(cap_one_df, logged_df, account_name) -> pd.DataFrame:
 
 def build_advisor_context(transactions_df, balances_df, holdings_df, price_cache_df, settings, food_metrics) -> str:
     """Lightweight briefing — tools fetch live detail on demand."""
-    today = date.today().strftime("%B %d, %Y")
+    today = today_local().strftime("%B %d, %Y")
     nw = build_net_worth(balances_df)
     debt = build_debt_summary(balances_df)
     runway = build_runway(transactions_df, balances_df, food_metrics)
@@ -1851,7 +1863,7 @@ def render_dashboard(settings, transactions_df, holdings_df, balances_df, price_
     latest_allocation = load_allocation_snapshots(limit=1)
 
     st.markdown('<div class="bb-title">Black Book</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="bb-subtitle">Personal Finance · {date.today().strftime("%B %d, %Y")}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="bb-subtitle">Personal Finance · {today_local().strftime("%B %d, %Y")}</div>', unsafe_allow_html=True)
     render_signal(signals[0])
 
     m1, m2, m3, m4 = st.columns(4)
@@ -1922,7 +1934,7 @@ def render_log_transaction(accounts_df: pd.DataFrame, transactions_df: pd.DataFr
     with tab1:
         with st.form("transaction_form", clear_on_submit=True):
             c1, c2, c3 = st.columns([1, 2, 1])
-            tx_date = c1.date_input("Date", value=date.today())
+            tx_date = c1.date_input("Date", value=today_local())
             description = c2.text_input("Description", placeholder="Chick-fil-A, paycheck, rent...")
             amount = c3.number_input("Amount", min_value=0.0, step=0.01, format="%.2f")
             c4, c5, c6 = st.columns(3)
@@ -2126,7 +2138,7 @@ def render_reports(settings, transactions_df, holdings_df, price_cache_df, balan
         st.markdown(f"""
         <div class="bb-report-card" style="border-color:{C_GREEN}33">
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.6rem">
-            <div class="bb-report-date" style="color:{C_GREEN}">{date.today().strftime("%B %d, %Y")}</div>
+            <div class="bb-report-date" style="color:{C_GREEN}">{today_local().strftime("%B %d, %Y")}</div>
             <div style="font-family:JetBrains Mono,monospace;font-size:0.6rem;color:{C_GREEN};letter-spacing:0.15em;text-transform:uppercase">Live · In Progress</div>
         </div>
         <div class="bb-report-row"><span>Net Worth</span><span class="bb-report-val">{format_currency(nw['net_worth'])}</span></div>
@@ -2255,24 +2267,50 @@ def render_reconcile(transactions_df, accounts_df) -> None:
 def render_journal() -> None:
     st.markdown('<div class="bb-title">Journal</div>', unsafe_allow_html=True)
     st.markdown('<div class="bb-subtitle">Private dated log</div>', unsafe_allow_html=True)
-    tab1, tab2 = st.tabs(["Write", "Read"])
+    tab1, tab2, tab3 = st.tabs(["Write", "Read", "Meridian"])
     with tab1:
-        st.markdown("""
+        # ── Meridian adaptive questions (falls back to static if none available) ──
+        _meridian_qs = []
+        if IS_POSTGRES:
+            try:
+                _conn = get_connection()
+                _cur = _conn.cursor()
+                _cur.execute(
+                    "SELECT questions FROM meridian_questions ORDER BY id DESC LIMIT 1"
+                )
+                _row = _cur.fetchone()
+                if _row:
+                    _data = _row[0] if not isinstance(_row[0], str) else __import__('json').loads(_row[0])
+                    _meridian_qs = [q.get("question", "") for q in _data if q.get("question")]
+                _cur.close(); _conn.close()
+            except Exception:
+                pass
+
+        if _meridian_qs:
+            _qs_html = "".join(
+                f'<span style="color:#374151">{i+1}&nbsp;&nbsp;&nbsp;&nbsp;</span>{q}<br>'
+                for i, q in enumerate(_meridian_qs)
+            )
+            _label = '<span style="color:#6b7280;font-size:0.6rem">Meridian &mdash; adaptive</span>'
+        else:
+            _qs_html = (
+                '<span style="color:#374151">STATE &nbsp;&nbsp;</span>1. How am I actually feeling today — physically and mentally?<br>'
+                '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2. What is the dominant emotion or energy I am carrying right now?<br>'
+                '<span style="color:#374151">MONEY &nbsp;&nbsp;</span>3. Did I make any financial decisions today? What was the reasoning?<br>'
+                '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;4. Is there any financial stress or clarity I am feeling right now?<br>'
+                '<span style="color:#374151">MIND &nbsp;&nbsp;&nbsp;</span>5. What is the most significant thought I had today?<br>'
+                '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;6. Did I act in alignment with who I want to be today? Where did I fall short?<br>'
+                '<span style="color:#374151">PATTERN</span> 7. What do I want to remember about today?'
+            )
+            _label = ''
+        st.markdown(f"""
         <div style="background:#0d1117;border:1px solid rgba(255,255,255,0.05);border-radius:2px;padding:1rem 1.2rem;margin-bottom:1.2rem">
-            <div style="font-family:JetBrains Mono,monospace;font-size:0.6rem;letter-spacing:0.2em;text-transform:uppercase;color:#374151;margin-bottom:0.8rem">Daily Prompts</div>
-            <div style="font-family:JetBrains Mono,monospace;font-size:0.72rem;color:#6b7280;line-height:2.2">
-                <span style="color:#374151">STATE &nbsp;&nbsp;</span>1. How am I actually feeling today — physically and mentally?<br>
-                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2. What is the dominant emotion or energy I am carrying right now?<br>
-                <span style="color:#374151">MONEY &nbsp;&nbsp;</span>3. Did I make any financial decisions today? What was the reasoning?<br>
-                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;4. Is there any financial stress or clarity I am feeling right now?<br>
-                <span style="color:#374151">MIND &nbsp;&nbsp;&nbsp;</span>5. What is the most significant thought I had today?<br>
-                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;6. Did I act in alignment with who I want to be today? Where did I fall short?<br>
-                <span style="color:#374151">PATTERN</span> 7. What do I want to remember about today?
-            </div>
+            <div style="font-family:JetBrains Mono,monospace;font-size:0.6rem;letter-spacing:0.2em;text-transform:uppercase;color:#374151;margin-bottom:0.8rem">Daily Prompts {_label}</div>
+            <div style="font-family:JetBrains Mono,monospace;font-size:0.72rem;color:#6b7280;line-height:2.2">{_qs_html}</div>
         </div>""", unsafe_allow_html=True)
         with st.form("journal_form", clear_on_submit=True):
             jc1, jc2 = st.columns([1, 1])
-            j_date = jc1.date_input("Date", value=date.today())
+            j_date = jc1.date_input("Date", value=today_local())
             j_tag = jc2.selectbox("Tag", JOURNAL_TAGS)
             j_body = st.text_area("Entry", placeholder="1. ...\n2. ...\n3. ...\n4. ...\n5. ...\n6. ...\n7. ...", height=220)
             if st.form_submit_button("Save Entry", type="primary"):
@@ -2301,11 +2339,53 @@ def render_journal() -> None:
                     if st.checkbox(f"Delete this entry", key=f"jdel_confirm_{entry_id}"):
                         if st.button("Delete", key=f"jdel_btn_{entry_id}", type="primary"):
                             delete_journal_entry(entry_id); st.rerun()
+    with tab3:
+        st.markdown("### Meridian")
+        st.caption("Meridian reads your journal entries, evolves beliefs, and generates adaptive daily questions.")
+        if not IS_POSTGRES:
+            st.info("Meridian requires PostgreSQL. Run Black Book with a Neon database to use this feature.")
+        else:
+            # Show last cycle info from meridian_questions
+            try:
+                _mc = get_connection()
+                _mcur = _mc.cursor()
+                _mcur.execute("SELECT generated_date, id FROM meridian_questions ORDER BY id DESC LIMIT 1")
+                _mrow = _mcur.fetchone()
+                _mcur.execute("SELECT status, requested_at FROM meridian_jobs ORDER BY id DESC LIMIT 1")
+                _jrow = _mcur.fetchone()
+                _mcur.close(); _mc.close()
+            except Exception:
+                _mrow = None; _jrow = None
+
+            if _mrow:
+                st.markdown(f"**Last cycle:** {str(_mrow[0])[:10] if _mrow[0] else 'unknown'} &nbsp;·&nbsp; Questions batch #{_mrow[1] if _mrow[1] else '?'}")
+            else:
+                st.markdown("**No cycles run yet.**")
+
+            if _jrow and _jrow[0] == "pending":
+                st.warning(f"Cycle queued — waiting for Meridian to pick it up. (Requested {str(_jrow[1])[:16]})")
+            else:
+                if st.button("Run Meridian Cycle", type="primary", use_container_width=True):
+                    try:
+                        _wc = get_connection()
+                        _wcur = _wc.cursor()
+                        _wcur.execute(
+                            "INSERT INTO meridian_jobs (status, requested_at) VALUES ('pending', %s)",
+                            (datetime.now().isoformat(),)
+                        )
+                        _wc.commit()
+                        _wcur.close(); _wc.close()
+                        st.success("Cycle queued. Run `python evolve.py evolve` on your machine to execute it.")
+                    except Exception as e:
+                        st.error(f"Could not queue job: {e}")
+
+            st.markdown("---")
+            st.caption("After queuing, open a terminal and run: `python evolve.py evolve` in your Meridian folder.")
 
 
 def render_agenda() -> None:
     st.markdown('<div class="bb-title">Agenda</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="bb-subtitle">Week of {date.today().strftime("%B %d, %Y")}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="bb-subtitle">Week of {today_local().strftime("%B %d, %Y")}</div>', unsafe_allow_html=True)
     has_google = all([st.secrets.get("GOOGLE_CLIENT_ID",""), st.secrets.get("GOOGLE_CLIENT_SECRET",""), st.secrets.get("GOOGLE_REFRESH_TOKEN","")])
     if not has_google or not _GOOGLE_AVAILABLE:
         st.info("Google Calendar not connected."); return
