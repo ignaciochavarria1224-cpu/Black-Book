@@ -185,7 +185,7 @@ def inject_css() -> None:
     /* ── Sidebar brand ── */
     .bb-sidebar-brand {
         font-family: 'Syne', sans-serif;
-        font-size: 1.45rem; font-weight: 800; letter-spacing: 0.05em; line-height: 1.1;
+        font-size: 2rem; font-weight: 800; letter-spacing: 0.06em; line-height: 1.1;
         padding: 0.2rem 0 0.05rem 0;
         background: linear-gradient(120deg, var(--mg) 0%, var(--pu) 55%, var(--cy) 100%);
         -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
@@ -227,7 +227,7 @@ def inject_css() -> None:
     /* ── Page titles ── */
     .bb-title {
         font-family: 'Syne', sans-serif;
-        font-size: 2.2rem; font-weight: 800; letter-spacing: 0.02em; line-height: 1; margin-bottom: 0;
+        font-size: 3.4rem; font-weight: 800; letter-spacing: 0.06em; line-height: 1.05; margin-bottom: 0.2rem;
         background: linear-gradient(120deg, var(--mg) 0%, var(--pu) 55%, var(--cy) 100%);
         -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
     }
@@ -2421,7 +2421,7 @@ def render_journal() -> None:
                         if st.button("Delete", key=f"jdel_btn_{entry_id}", type="primary"):
                             delete_journal_entry(entry_id); st.rerun()
     with tab3:
-        st.markdown('<div class="bb-title" style="font-size:1.6rem">Meridian</div>', unsafe_allow_html=True)
+        st.markdown('<div class="bb-title">Meridian</div>', unsafe_allow_html=True)
         st.markdown('<div class="bb-subtitle">Second brain · belief evolution</div>', unsafe_allow_html=True)
         if not IS_POSTGRES:
             st.info("Meridian requires PostgreSQL.")
@@ -2444,9 +2444,17 @@ def render_journal() -> None:
                         "FROM meridian_notes ORDER BY fitness DESC NULLS LAST"
                     )
                     _notes_raw = _mcur.fetchall()
+                    try:
+                        _mcur.execute(
+                            "SELECT theme, body, cycle FROM meridian_brain "
+                            "WHERE theme != 'INDEX' ORDER BY theme"
+                        )
+                        _brain_raw = _mcur.fetchall()
+                    except Exception:
+                        _brain_raw = []
                     _mcur.close()
                 except Exception:
-                    _mrow = None; _jrow = None; _notes_raw = []
+                    _mrow = None; _jrow = None; _notes_raw = []; _brain_raw = []
                 finally:
                     if _mc:
                         _mc.close()
@@ -2514,112 +2522,238 @@ def render_journal() -> None:
 
             st.markdown("---")
 
-            # ── Vault view ─────────────────────────────────────────────────
-            if not _notes:
-                st.info("No notes in vault yet. Run a cycle to populate.")
+            # ── Vault view ──────────────────────────────────────────────────────────────
+            _STAGE_ORDER = ["framework", "tree", "sprout", "seed"]
+            _STAGE_LABELS = {
+                "framework": "Frameworks",
+                "tree": "Trees",
+                "sprout": "Sprouts",
+                "seed": "Seeds",
+            }
+            _STAGE_COLORS = {
+                "framework": "#FFD700",
+                "tree": "#E8A020",
+                "sprout": "#5BA85A",
+                "seed": "#4A90D9",
+            }
+
+            if not _notes and not _brain_raw:
+                st.info("No vault data yet. Run a cycle to populate.")
             else:
-                _STAGE_ORDER = ["framework", "tree", "sprout", "seed"]
-                _STAGE_LABELS = {
-                    "framework": "Frameworks",
-                    "tree": "Trees",
-                    "sprout": "Sprouts",
-                    "seed": "Seeds",
-                }
-                _STAGE_COLORS = {
-                    "framework": "#FFD700",
-                    "tree": "#E8A020",
-                    "sprout": "#5BA85A",
-                    "seed": "#4A90D9",
-                }
-
-                _filter_stage = st.selectbox(
-                    "Filter by stage",
-                    ["All"] + [_STAGE_LABELS[s] for s in _STAGE_ORDER if _stage_counts.get(s, 0) > 0],
-                    key="meridian_stage_filter"
-                )
-                _filter_map = {v: k for k, v in _STAGE_LABELS.items()}
-                _filtered = [
-                    n for n in _notes
-                    if _filter_stage == "All" or n["stage"] == _filter_map.get(_filter_stage)
-                ]
-
-                for _stage in _STAGE_ORDER:
-                    _group = [n for n in _filtered if n["stage"] == _stage]
-                    if not _group:
-                        continue
-                    _color = _STAGE_COLORS[_stage]
-                    st.markdown(
-                        f'<div style="font-family:JetBrains Mono,monospace;font-size:0.65rem;'
-                        f'letter-spacing:0.15em;text-transform:uppercase;color:{_color};'
-                        f'margin:1.2rem 0 0.4rem">— {_STAGE_LABELS[_stage]} ({len(_group)}) —</div>',
-                        unsafe_allow_html=True
+                if _notes:
+                    _filter_stage = st.selectbox(
+                        "Filter by stage",
+                        ["All"] + [_STAGE_LABELS[s] for s in _STAGE_ORDER if _stage_counts.get(s, 0) > 0],
+                        key="meridian_stage_filter"
                     )
-                    for _n in _group:
-                        _fit = f"{_n['fitness']:.0f}" if _n["fitness"] else "—"
-                        _doms = ", ".join(d for d in _n["domains"] if d)[:60]
-                        with st.expander(f"{_n['title'][:80]}   · fit {_fit}", expanded=False):
-                            if _doms:
-                                st.caption(_doms)
-                            if _n["body"]:
-                                st.markdown(_n["body"][:1500])
+                    _filter_map = {v: k for k, v in _STAGE_LABELS.items()}
+                    _filtered = [
+                        n for n in _notes
+                        if _filter_stage == "All" or n["stage"] == _filter_map.get(_filter_stage)
+                    ]
+                    for _stage in _STAGE_ORDER:
+                        _group = [n for n in _filtered if n["stage"] == _stage]
+                        if not _group:
+                            continue
+                        _color = _STAGE_COLORS[_stage]
+                        st.markdown(
+                            f'<div style="font-family:JetBrains Mono,monospace;font-size:0.65rem;'
+                            f'letter-spacing:0.15em;text-transform:uppercase;color:{_color};'
+                            f'margin:1.2rem 0 0.4rem">— {_STAGE_LABELS[_stage]} ({len(_group)}) —</div>',
+                            unsafe_allow_html=True
+                        )
+                        for _n in _group:
+                            _fit = f"{_n['fitness']:.0f}" if _n["fitness"] else "—"
+                            _doms = ", ".join(d for d in _n["domains"] if d)[:60]
+                            with st.expander(f"{_n['title'][:80]}   · fit {_fit}", expanded=False):
+                                if _doms:
+                                    st.caption(_doms)
+                                if _n["body"]:
+                                    st.markdown(_n["body"][:1500])
 
-                # ── Graph view ─────────────────────────────────────────────
+                # ── Graph view ─────────────────────────────────────────────────────────────
                 st.markdown("---")
                 st.markdown(
-                    '<div style="font-family:JetBrains Mono,monospace;font-size:0.65rem;'
-                    'letter-spacing:0.15em;text-transform:uppercase;color:#6b7280;'
-                    'margin-bottom:0.6rem">Graph View</div>',
+                    '<div style="font-family:JetBrains Mono,monospace;font-size:0.62rem;'
+                    'letter-spacing:0.18em;text-transform:uppercase;color:rgba(189,52,254,0.7);'
+                    'margin-bottom:0.8rem">— Graph View —</div>',
                     unsafe_allow_html=True
                 )
 
-                # Build title → id map (lowercase for fuzzy match)
-                _tid_map = {n["title"].lower(): n["id"] for n in _notes}
-                _vis_nodes = []
-                _vis_edges = []
-                _edge_set = set()
-                for _n in _notes:
-                    _fit_val = _n["fitness"] or 30
-                    _vis_nodes.append({
-                        "id": _n["id"],
-                        "label": _n["title"][:35],
-                        "color": _STAGE_COLORS.get(_n["stage"], "#4A90D9"),
-                        "size": 6 + _fit_val / 12,
-                        "title": f"<b>{_html.escape(_n['title'])}</b><br>Stage: {_n['stage']}<br>Fitness: {_n['fitness'] or '?'}<br>{'<br>'.join(_html.escape(d) for d in _n['domains'] if d)[:120]}",
-                        "font": {"size": 10},
-                    })
-                    if _n["body"]:
-                        for _lnk in re.findall(r'\[\[([^\]|#]+?)(?:\|[^\]]+)?\]\]', _n["body"]):
-                            _target = _tid_map.get(_lnk.strip().lower())
-                            if _target and _target != _n["id"]:
-                                _ek = tuple(sorted([_n["id"], _target]))
-                                if _ek not in _edge_set:
-                                    _edge_set.add(_ek)
-                                    _vis_edges.append({"from": _n["id"], "to": _target})
+                _BB_PALETTE = [
+                    "#E040FB", "#00E5FF", "#BD34FE", "#7C3AED",
+                    "#06B6D4", "#F59E0B", "#10B981", "#F472B6",
+                    "#818CF8", "#34D399",
+                ]
 
-                _nodes_json = json.dumps(_vis_nodes)
-                _edges_json = json.dumps(_vis_edges)
+                _g_nodes = []
+                _g_edges = []
+                _g_edge_set = set()
+                _node_info = {}
+
+                if _brain_raw:
+                    _t2id = {}
+                    for _bi, _br in enumerate(_brain_raw):
+                        _btheme = str(_col(_br, 0, "theme"))
+                        _bbody = str(_col(_br, 1, "body") or "")
+                        _ec = re.search(r'entry_count:\s*(\d+)', _bbody)
+                        _ec_n = int(_ec.group(1)) if _ec else 1
+                        _t2id[_btheme.lower()] = _bi
+                        _bcol = _BB_PALETTE[_bi % len(_BB_PALETTE)]
+                        _belief = re.search(r'\*\*Core Belief:\*\*\s*([^\n]+)', _bbody)
+                        _belief_txt = _belief.group(1)[:100] if _belief else ""
+                        _g_nodes.append({
+                            "id": _bi,
+                            "label": _btheme,
+                            "color": {
+                                "background": _bcol, "border": _bcol,
+                                "highlight": {"background": _bcol, "border": "#ffffff"},
+                                "hover": {"background": _bcol, "border": "#ffffff"},
+                            },
+                            "size": max(10, min(32, 8 + _ec_n * 3)),
+                            "title": f"<b>{_html.escape(_btheme)}</b><br>Entries: {_ec_n}" + (f"<br><br>{_html.escape(_belief_txt)}" if _belief_txt else ""),
+                            "font": {"size": 11},
+                        })
+                        _node_info[str(_bi)] = {
+                            "title": _btheme,
+                            "body": f"<b>Entries:</b> {_ec_n}" + (f"<br><br>{_html.escape(_belief_txt)}" if _belief_txt else ""),
+                        }
+                    for _bi, _br in enumerate(_brain_raw):
+                        _bbody = str(_col(_br, 1, "body") or "")
+                        for _lnk in re.findall(r'\[\[([^\]|#]+?)(?:\|[^\]]+)?\]\]', _bbody):
+                            _tid2 = _t2id.get(_lnk.strip().lower())
+                            if _tid2 is not None and _tid2 != _bi:
+                                _ek = tuple(sorted([_bi, _tid2]))
+                                if _ek not in _g_edge_set:
+                                    _g_edge_set.add(_ek)
+                                    _g_edges.append({"from": _bi, "to": _tid2})
+                    _leg_rows = []
+                    for _li, _lb in enumerate(_brain_raw[:8]):
+                        _lt = str(_col(_lb, 0, "theme"))
+                        _lc = _BB_PALETTE[_li % len(_BB_PALETTE)]
+                        _leg_rows.append(f'<div class="lr"><div class="ld" style="background:{_lc}"></div>{_html.escape(_lt[:22])}</div>')
+                    if len(_brain_raw) > 8:
+                        _leg_rows.append(f'<div class="lr" style="color:rgba(130,105,170,0.4)">+{len(_brain_raw)-8} more</div>')
+                    _legend_html = "".join(_leg_rows)
+
+                elif _notes:
+                    _tid_map = {n["title"].lower(): n["id"] for n in _notes}
+                    for _n in _notes:
+                        _fit_val = _n["fitness"] or 30
+                        _nc = _STAGE_COLORS.get(_n["stage"], "#4A90D9")
+                        _g_nodes.append({
+                            "id": _n["id"],
+                            "label": _n["title"][:35],
+                            "color": {
+                                "background": _nc, "border": _nc,
+                                "highlight": {"background": _nc, "border": "#ffffff"},
+                                "hover": {"background": _nc, "border": "#ffffff"},
+                            },
+                            "size": 6 + _fit_val / 12,
+                            "title": f"<b>{_html.escape(_n['title'])}</b><br>Stage: {_n['stage']}<br>Fitness: {_n['fitness'] or '?'}",
+                            "font": {"size": 11},
+                        })
+                        _node_info[str(_n["id"])] = {
+                            "title": _n["title"],
+                            "body": f"Stage: {_n['stage']}<br>Fitness: {_n['fitness'] or '?'}",
+                        }
+                        if _n["body"]:
+                            for _lnk in re.findall(r'\[\[([^\]|#]+?)(?:\|[^\]]+)?\]\]', _n["body"]):
+                                _tgt = _tid_map.get(_lnk.strip().lower())
+                                if _tgt and _tgt != _n["id"]:
+                                    _ek2 = tuple(sorted([_n["id"], _tgt]))
+                                    if _ek2 not in _g_edge_set:
+                                        _g_edge_set.add(_ek2)
+                                        _g_edges.append({"from": _n["id"], "to": _tgt})
+                    _legend_html = (
+                        '<div class="lr"><div class="ld" style="background:#FFD700"></div>Framework</div>'
+                        '<div class="lr"><div class="ld" style="background:#E8A020"></div>Tree</div>'
+                        '<div class="lr"><div class="ld" style="background:#5BA85A"></div>Sprout</div>'
+                        '<div class="lr"><div class="ld" style="background:#4A90D9"></div>Seed</div>'
+                    )
+                else:
+                    _legend_html = ""
+
+                _g_nodes_json = json.dumps(_g_nodes)
+                _g_edges_json = json.dumps(_g_edges)
+                _node_info_json = json.dumps(_node_info)
+
                 _graph_html = f"""<!DOCTYPE html>
 <html><head>
 <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 <style>
-  body{{margin:0;background:#0d1117;overflow:hidden}}
-  #net{{width:100%;height:560px;background:#0d1117}}
-  .vis-tooltip{{background:#161b22!important;border:1px solid #30363d!important;color:#c9d1d9!important;font-family:monospace!important;font-size:11px!important;border-radius:4px!important;padding:6px 10px!important}}
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#03030A;overflow:hidden;font-family:'JetBrains Mono',monospace}}
+#net{{width:100%;height:680px}}
+#controls{{position:absolute;bottom:14px;right:14px;display:flex;flex-direction:column;gap:4px;z-index:10}}
+.ctrl{{background:rgba(16,8,32,0.9);border:1px solid rgba(189,52,254,0.35);color:rgba(224,64,251,0.9);width:30px;height:30px;border-radius:4px;cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;transition:all 0.15s ease}}
+.ctrl:hover{{background:rgba(224,64,251,0.18);border-color:rgba(224,64,251,0.7)}}
+#legend{{position:absolute;top:12px;left:12px;background:rgba(10,5,22,0.88);border:1px solid rgba(189,52,254,0.2);border-radius:5px;padding:9px 12px;z-index:10;max-height:calc(100% - 24px);overflow:auto}}
+.lr{{display:flex;align-items:center;gap:7px;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(180,150,220,0.65);margin-bottom:4px}}
+.lr:last-child{{margin-bottom:0}}
+.ld{{width:9px;height:9px;border-radius:50%;flex-shrink:0}}
+#panel{{position:absolute;top:12px;right:12px;background:rgba(10,5,22,0.93);border:1px solid rgba(224,64,251,0.3);border-radius:6px;padding:12px 14px 10px;z-index:10;max-width:220px;display:none}}
+#pt{{font-size:12px;font-weight:700;color:#E040FB;margin-bottom:5px;letter-spacing:0.04em;line-height:1.3}}
+#pb{{font-size:10px;color:rgba(180,150,220,0.7);line-height:1.6;letter-spacing:0.03em}}
+#px{{position:absolute;top:7px;right:9px;cursor:pointer;font-size:10px;color:rgba(180,150,220,0.45)}}
+#px:hover{{color:#E040FB}}
+#hint{{position:absolute;bottom:14px;left:14px;font-size:9px;letter-spacing:0.15em;text-transform:uppercase;color:rgba(130,105,170,0.35)}}
+.vis-tooltip{{background:rgba(10,5,22,0.96)!important;border:1px solid rgba(189,52,254,0.45)!important;color:rgba(220,210,255,0.92)!important;font-family:'JetBrains Mono',monospace!important;font-size:11px!important;border-radius:4px!important;padding:8px 12px!important;line-height:1.55!important;box-shadow:0 4px 22px rgba(189,52,254,0.25)!important}}
 </style></head><body>
 <div id="net"></div>
+<div id="legend">{_legend_html}</div>
+<div id="panel"><div id="px">✕</div><div id="pt"></div><div id="pb"></div></div>
+<div id="controls">
+  <button class="ctrl" id="btn-fit" title="Fit all">&#x229F;</button>
+  <button class="ctrl" id="btn-zi" title="Zoom in">+</button>
+  <button class="ctrl" id="btn-zo" title="Zoom out">&minus;</button>
+  <button class="ctrl" id="btn-rst" title="Reset">&#x25CB;</button>
+</div>
+<div id="hint">click to focus &middot; double-click to zoom</div>
 <script>
-var nodes=new vis.DataSet({_nodes_json});
-var edges=new vis.DataSet({_edges_json});
-new vis.Network(document.getElementById('net'),{{nodes:nodes,edges:edges}},{{
-  nodes:{{shape:'dot',font:{{color:'#8b949e',size:10,face:'monospace'}},borderWidth:0,opacity:0.9}},
-  edges:{{color:{{color:'#30363d',opacity:0.5}},width:1,smooth:{{type:'continuous'}}}},
-  physics:{{stabilization:{{iterations:200}},barnesHut:{{gravitationalConstant:-3500,springLength:90,damping:0.12}}}},
-  interaction:{{hover:true,tooltipDelay:80,navigationButtons:false,zoomView:true}}
+var ndata=new vis.DataSet({_g_nodes_json});
+var edata=new vis.DataSet({_g_edges_json});
+var infoMap={_node_info_json};
+var net=new vis.Network(document.getElementById('net'),{{nodes:ndata,edges:edata}},{{
+  nodes:{{shape:'dot',font:{{color:'rgba(200,185,235,0.85)',size:11,face:'JetBrains Mono,monospace',strokeWidth:0}},borderWidth:1.5,borderWidthSelected:3,shadow:{{enabled:true,color:'rgba(189,52,254,0.35)',size:12,x:0,y:0}}}},
+  edges:{{color:{{color:'rgba(189,52,254,0.28)',highlight:'rgba(224,64,251,0.9)',hover:'rgba(0,229,255,0.7)'}},width:1.5,hoverWidth:3,selectionWidth:3,smooth:{{type:'curvedCW',roundness:0.2}},arrows:{{to:{{enabled:true,scaleFactor:0.45}}}}}},
+  physics:{{stabilization:{{iterations:400,fit:true}},barnesHut:{{gravitationalConstant:-5000,centralGravity:0.25,springLength:150,springConstant:0.04,damping:0.18,avoidOverlap:0.6}}}},
+  interaction:{{hover:true,tooltipDelay:100,navigationButtons:false,zoomView:true,selectConnectedEdges:true,hoverConnectedEdges:true}}
 }});
+function resetAll(){{
+  var allN=ndata.getIds(),allE=edata.getIds(),rn=[],re2=[];
+  for(var i=0;i<allN.length;i++){{rn.push({{id:allN[i],opacity:1}});}}
+  for(var i=0;i<allE.length;i++){{re2.push({{id:allE[i],color:undefined}});}}
+  ndata.update(rn);edata.update(re2);
+  document.getElementById('panel').style.display='none';net.unselectAll();
+}}
+document.getElementById('btn-fit').onclick=function(){{net.fit({{animation:{{duration:500,easingFunction:'easeInOutQuad'}}}});}};
+document.getElementById('btn-zi').onclick=function(){{net.moveTo({{scale:net.getScale()*1.4,animation:{{duration:250}}}});}};
+document.getElementById('btn-zo').onclick=function(){{net.moveTo({{scale:net.getScale()/1.4,animation:{{duration:250}}}});}};
+document.getElementById('btn-rst').onclick=resetAll;
+document.getElementById('px').onclick=resetAll;
+net.on('click',function(p){{
+  if(!p.nodes.length){{resetAll();return;}}
+  var id=p.nodes[0],conn=net.getConnectedNodes(id),cedges=net.getConnectedEdges(id);
+  var allN=ndata.getIds(),allE=edata.getIds(),dn=[],bn=[{{id:id,opacity:1}}];
+  for(var i=0;i<allN.length;i++){{
+    if(allN[i]!==id&&conn.indexOf(allN[i])===-1){{dn.push({{id:allN[i],opacity:0.08}});}}
+    else if(allN[i]!==id){{bn.push({{id:allN[i],opacity:0.8}});}}
+  }}
+  ndata.update(dn);ndata.update(bn);
+  var de=[],be=[];
+  for(var j=0;j<allE.length;j++){{
+    if(cedges.indexOf(allE[j])===-1){{de.push({{id:allE[j],color:{{color:'rgba(189,52,254,0.04)'}}}});}}
+    else{{be.push({{id:allE[j],color:{{color:'rgba(224,64,251,0.95)'}}}});}}
+  }}
+  edata.update(de);edata.update(be);
+  var info=infoMap[String(id)];
+  if(info){{document.getElementById('pt').textContent=info.title;document.getElementById('pb').innerHTML=info.body;document.getElementById('panel').style.display='block';}}
+}});
+net.on('doubleClick',function(p){{if(p.nodes.length){{net.focus(p.nodes[0],{{scale:2.2,animation:{{duration:500,easingFunction:'easeInOutQuad'}}}});}}}});
+net.on('stabilizationIterationsDone',function(){{net.setOptions({{physics:{{enabled:false}}}});}});
 </script></body></html>"""
-                if not _vis_edges:
-                    st.caption("No connections yet — graph fills in as seeds evolve into sprouts and trees with wikilinks between them.")
-                st.components.v1.html(_graph_html, height=580, scrolling=False)
+                st.components.v1.html(_graph_html, height=700, scrolling=False)
 
 
 def render_agenda() -> None:
