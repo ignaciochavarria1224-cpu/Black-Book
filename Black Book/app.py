@@ -2287,55 +2287,107 @@ def render_reconcile(transactions_df, accounts_df) -> None:
                            file_name=f"reconcile_{selected_account}_{date.today()}.csv", mime="text/csv")
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_meridian_questions() -> tuple[list, list, str]:
+    """Fetch questions from Neon. Returns (fitness_qs, dynamic_qs, generated_date).
+    Cached for 5 minutes — auto-refreshes when Meridian pushes a new cycle."""
+    if not IS_POSTGRES:
+        return [], [], ""
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT questions, generated_date FROM meridian_questions ORDER BY id DESC LIMIT 1")
+        row = cur.fetchone()
+        cur.close()
+        if not row:
+            return [], [], ""
+        raw = row["questions"] if isinstance(row, dict) else row[0]
+        gen_date = (row["generated_date"] if isinstance(row, dict) else row[1]) or ""
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+        fitness = [q for q in raw if q.get("type") == "fitness" or q.get("permanent")]
+        dynamic = [q for q in raw if q.get("type") not in ("fitness",) and not q.get("permanent")]
+        return fitness, dynamic, str(gen_date)[:10]
+    except Exception:
+        return [], [], ""
+    finally:
+        if conn:
+            conn.close()
+
+
 def render_journal() -> None:
     st.markdown('<div class="bb-title">Journal</div>', unsafe_allow_html=True)
     st.markdown('<div class="bb-subtitle">Private dated log</div>', unsafe_allow_html=True)
     tab1, tab2, tab3 = st.tabs(["Write", "Read", "Meridian"])
     with tab1:
-        # ── Meridian adaptive questions (falls back to static if none available) ──
-        _meridian_qs = []
-        if IS_POSTGRES:
-            _conn = None
-            try:
-                _conn = get_connection()
-                _cur = _conn.cursor()
-                _cur.execute(
-                    "SELECT questions FROM meridian_questions ORDER BY id DESC LIMIT 1"
-                )
-                _row = _cur.fetchone()
-                if _row:
-                    _raw = _row["questions"] if isinstance(_row, dict) else _row[0]
-                    if isinstance(_raw, str):
-                        _raw = json.loads(_raw)
-                    _meridian_qs = [q.get("question", "") for q in _raw if q.get("question")]
-                _cur.close()
-            except Exception:
-                pass
-            finally:
-                if _conn:
-                    _conn.close()
+        # ── Fetch questions (cached 5 min, auto-refreshes after Meridian cycle) ──
+        _fitness_qs, _dynamic_qs, _gen_date = _fetch_meridian_questions()
 
-        if _meridian_qs:
-            _qs_html = "".join(
-                f'<span style="color:#374151">{i+1}&nbsp;&nbsp;&nbsp;&nbsp;</span>{q}<br>'
-                for i, q in enumerate(_meridian_qs)
-            )
-            _label = '<span style="color:#6b7280;font-size:0.6rem">Meridian &mdash; adaptive</span>'
-        else:
-            _qs_html = (
-                '<span style="color:#374151">STATE &nbsp;&nbsp;</span>1. How am I actually feeling today — physically and mentally?<br>'
-                '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2. What is the dominant emotion or energy I am carrying right now?<br>'
-                '<span style="color:#374151">MONEY &nbsp;&nbsp;</span>3. Did I make any financial decisions today? What was the reasoning?<br>'
-                '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;4. Is there any financial stress or clarity I am feeling right now?<br>'
-                '<span style="color:#374151">MIND &nbsp;&nbsp;&nbsp;</span>5. What is the most significant thought I had today?<br>'
-                '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;6. Did I act in alignment with who I want to be today? Where did I fall short?<br>'
-                '<span style="color:#374151">PATTERN</span> 7. What do I want to remember about today?'
-            )
-            _label = ''
+        # ── Physical check-in block (3 permanent fitness questions) ──────────
+        _default_fitness = [
+            "Did I go to the gym today?",
+            "Did I wake up on time?",
+            "Did I eat enough and/or good food?",
+        ]
+        _fit_items = _fitness_qs if _fitness_qs else [{"question": q} for q in _default_fitness]
+        _fit_html = "".join(
+            f'<div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.45rem">'
+            f'<span style="color:#4A90D9;font-size:0.75rem">○</span>'
+            f'<span>{_html.escape(q.get("question", q) if isinstance(q, dict) else q)}</span>'
+            f'</div>'
+            for q in _fit_items
+        )
         st.markdown(f"""
-        <div style="background:#0d1117;border:1px solid rgba(255,255,255,0.05);border-radius:2px;padding:1rem 1.2rem;margin-bottom:1.2rem">
-            <div style="font-family:JetBrains Mono,monospace;font-size:0.6rem;letter-spacing:0.2em;text-transform:uppercase;color:#374151;margin-bottom:0.8rem">Daily Prompts {_label}</div>
-            <div style="font-family:JetBrains Mono,monospace;font-size:0.72rem;color:#6b7280;line-height:2.2">{_qs_html}</div>
+        <div style="background:#0d1117;border:1px solid rgba(74,144,217,0.15);border-radius:2px;
+                    padding:0.85rem 1.2rem;margin-bottom:0.8rem">
+            <div style="font-family:JetBrains Mono,monospace;font-size:0.55rem;letter-spacing:0.2em;
+                        text-transform:uppercase;color:#4A90D9;margin-bottom:0.7rem">Physical</div>
+            <div style="font-family:JetBrains Mono,monospace;font-size:0.72rem;color:#6b7280;line-height:1.8">
+                {_fit_html}
+            </div>
+        </div>""", unsafe_allow_html=True)
+
+        # ── Meridian adaptive questions block ─────────────────────────────────
+        if _dynamic_qs:
+            _dyn_html = "".join(
+                f'<div style="display:flex;gap:0.8rem;margin-bottom:0.45rem">'
+                f'<span style="color:#374151;min-width:1rem">{i + 1}</span>'
+                f'<span>{_html.escape(q.get("question", ""))}</span>'
+                f'</div>'
+                for i, q in enumerate(_dynamic_qs)
+            )
+            _meridian_label = (
+                f'<span style="color:#6b7280;font-size:0.55rem;letter-spacing:0.1em">Meridian</span>'
+                + (f'<span style="color:#374151;font-size:0.55rem"> &mdash; {_gen_date}</span>' if _gen_date else "")
+            )
+        else:
+            # Fallback static prompts if Meridian hasn't run yet
+            _dyn_html = (
+                '<div style="display:flex;gap:0.8rem;margin-bottom:0.45rem"><span style="color:#374151;min-width:1rem">1</span><span>What is the most significant thought I had today?</span></div>'
+                '<div style="display:flex;gap:0.8rem;margin-bottom:0.45rem"><span style="color:#374151;min-width:1rem">2</span><span>Did I act in alignment with who I want to be today?</span></div>'
+                '<div style="display:flex;gap:0.8rem;margin-bottom:0.45rem"><span style="color:#374151;min-width:1rem">3</span><span>What do I want to remember about today?</span></div>'
+                '<div style="display:flex;gap:0.8rem;margin-bottom:0.45rem"><span style="color:#374151;min-width:1rem">4</span><span>What decision did I face today, and how did I handle it?</span></div>'
+            )
+            _meridian_label = '<span style="color:#374151;font-size:0.55rem">static &mdash; run a Meridian cycle to activate</span>'
+
+        # Refresh button (inline with label)
+        _rcol1, _rcol2 = st.columns([6, 1])
+        with _rcol2:
+            if st.button("↻", help="Refresh questions from Meridian", use_container_width=True):
+                st.cache_data.clear()
+                st.rerun()
+
+        st.markdown(f"""
+        <div style="background:#0d1117;border:1px solid rgba(255,255,255,0.05);border-radius:2px;
+                    padding:0.85rem 1.2rem;margin-bottom:1.2rem">
+            <div style="font-family:JetBrains Mono,monospace;font-size:0.55rem;letter-spacing:0.2em;
+                        text-transform:uppercase;color:#374151;margin-bottom:0.7rem">
+                Feed from Meridian &nbsp;&nbsp;{_meridian_label}
+            </div>
+            <div style="font-family:JetBrains Mono,monospace;font-size:0.72rem;color:#6b7280;line-height:1.9">
+                {_dyn_html}
+            </div>
         </div>""", unsafe_allow_html=True)
         with st.form("journal_form", clear_on_submit=True):
             jc1, jc2 = st.columns([1, 1])
