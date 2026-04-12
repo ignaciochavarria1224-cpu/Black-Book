@@ -185,7 +185,7 @@ def inject_css() -> None:
     /* ── Sidebar brand ── */
     .bb-sidebar-brand {
         font-family: 'Syne', sans-serif;
-        font-size: 2rem; font-weight: 800; letter-spacing: 0.06em; line-height: 1.1;
+        font-size: 1.6rem; font-weight: 800; letter-spacing: 0.05em; line-height: 1.1;
         padding: 0.2rem 0 0.05rem 0;
         background: linear-gradient(120deg, var(--mg) 0%, var(--pu) 55%, var(--cy) 100%);
         -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
@@ -227,7 +227,7 @@ def inject_css() -> None:
     /* ── Page titles ── */
     .bb-title {
         font-family: 'Syne', sans-serif;
-        font-size: 3.4rem; font-weight: 800; letter-spacing: 0.06em; line-height: 1.05; margin-bottom: 0.2rem;
+        font-size: 2.6rem; font-weight: 800; letter-spacing: 0.04em; line-height: 1.05; margin-bottom: 0.15rem;
         background: linear-gradient(120deg, var(--mg) 0%, var(--pu) 55%, var(--cy) 100%);
         -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
     }
