@@ -1,2 +1,6 @@
-
 reflex==0.8.28.post1
+psycopg2-binary
+python-dotenv
+groq
+yfinance
+httpx
